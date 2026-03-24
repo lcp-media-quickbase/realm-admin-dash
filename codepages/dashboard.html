@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LCP App</title><!-- Update to your app name -->
+<link rel="stylesheet" href="shared.css">
+<style>
+  .app-header {
+    display: flex; align-items: center; height: 44px; padding: 0 20px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; gap: 16px; z-index: 60;
+  }
+  .app-header-logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .app-header-logo svg { flex-shrink: 0; }
+  .app-header-logo span { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
+  .app-header-sep { color: var(--text-dim); font-size: 16px; margin: 0 6px; font-weight: 300; }
+  .app-header-title { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+  .app-header-search { flex: 1; max-width: 420px; margin: 0 auto; position: relative; }
+  .app-header-search input {
+    width: 100%; padding: 6px 12px 6px 32px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--bg); color: var(--text);
+    font-family: inherit; font-size: 13px; outline: none; transition: border-color 0.15s;
+  }
+  .app-header-search input:focus { border-color: var(--accent); }
+  .app-header-search input::placeholder { color: var(--text-dim); }
+  .app-header-search-icon {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    color: var(--text-dim); pointer-events: none;
+  }
+  .app-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .btn-ticket {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px;
+    border: 1px solid var(--accent-border); border-radius: 6px; background: var(--accent-dim);
+    color: var(--accent); font-family: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-ticket:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-ticket svg { width: 14px; height: 14px; }
+  .tab-loading {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: var(--text-dim); font-family: system-ui; flex-direction: column;
+  }
+  .tab-loading .spinner {
+    width: 20px; height: 20px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin-bottom: 10px;
+  }
+  .app-body  { display: flex; flex: 1; overflow: hidden; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  [data-theme="light"] .app-header { box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  [data-theme="light"] .app-header-search input { background: #fff; }
+</style>
+</head>
+<body>
+<script src="shared.js"></script>
+<script>
+// ─── BOOTSTRAP ───────────────────────────────────────────────
+if (!initAuth()) {
+  document.body.innerHTML = '<div class="tab-loading"><span style="color:var(--danger)">Authentication failed.</span></div>';
+} else {
+
+detectRole();
+
+// ─── ROLE GROUPS ─────────────────────────────────────────────
+// Define convenient role arrays for use in registerTab() calls.
+// Update these to match the roles in your QB app.
+var ALL_ROLES   = Object.values(ROLE);           // every role can see this tab
+var ADMIN_ROLES = [ROLE.ADMIN];                  // admins only
+// Add more groups as needed, e.g.:
+// var EDIT_ROLES = [ROLE.ADMIN, ROLE.EDITOR];
+
+// ─── BUILD SHELL ─────────────────────────────────────────────
+// Runs after all tab JS files below have been loaded and registered.
+function buildDashboard() {
+  window.buildDashboard = buildDashboard;
+  document.body.innerHTML =
+    renderAppHeader() +
+    '<div class="app-body">' +
+      renderDashboardNav() +
+      '<div class="main-content" style="flex:1;display:flex;flex-direction:column;overflow:hidden">' +
+        '<div id="tabArea" style="flex:1;display:flex;flex-direction:column;overflow:hidden">' +
+          renderTabContainers() +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  // Wire up header search to the active tab's onSearch handler
+  var searchInput = document.getElementById('appSearchInput');
+  if (searchInput) {
+    var searchTimer = null;
+    searchInput.addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      var val = this.value;
+      searchTimer = setTimeout(function() {
+        if (_activeTab && _tabs[_activeTab] && typeof _tabs[_activeTab].onSearch === 'function') {
+          _tabs[_activeTab].onSearch(val);
+        }
+      }, 200);
+    });
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = '';
+        if (_activeTab && _tabs[_activeTab] && typeof _tabs[_activeTab].onSearch === 'function') {
+          _tabs[_activeTab].onSearch('');
+        }
+      }
+    });
+  }
+
+  // Navigate to tab from URL hash, or default to first visible tab
+  var hash    = window.location.hash.replace('#', '');
+  var visible = getVisibleTabs();
+  var startTab = (hash && _tabs[hash]) ? hash : (visible.length ? visible[0].id : null);
+  if (startTab) switchTab(startTab);
+
+  // Resolve the logged-in user's email in the background
+  if (typeof resolveCurrentUser === 'function') resolveCurrentUser();
+  if (typeof loadQBUsers        === 'function') loadQBUsers();
+
+  // Support browser back/forward navigation
+  window.addEventListener('hashchange', function() {
+    var h = window.location.hash.replace('#', '');
+    if (h && _tabs[h] && h !== _activeTab) switchTab(h);
+  });
+}
+
+} // end initAuth block
+</script>
+
+<!-- ─── TAB MODULES ───────────────────────────────────────────
+     Add one <script> tag per tab. Each file calls registerTab() to
+     register itself with the dashboard framework.
+     Tabs are shown in the sidebar in the order they are registered.
+  -->
+<script src="tabs/example.js"></script>
+
+<!-- Add more tabs here:
+<script src="tabs/my-tab.js"></script>
+-->
+
+<script>
+// After all tabs are registered, build the dashboard
+if (typeof buildDashboard === 'function') buildDashboard();
+</script>
+</body>
+</html>

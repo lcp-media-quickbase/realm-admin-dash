@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LCP App</title>
+<style>
+html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#0f1117}
+.loader{display:flex;align-items:center;justify-content:center;height:100%;color:#565a6e;font-family:system-ui;flex-direction:column}
+.spinner{width:24px;height:24px;border:2px solid #2a2d3a;border-top-color:#68B6E5;border-radius:50%;animation:s .8s linear infinite;margin-bottom:12px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="loader" id="loader"><div class="spinner"></div>Loading...</div>
+<script>
+// ── CONFIGURE THIS ──────────────────────────────────────────
+var REPO = 'YOUR_ORG/YOUR_REPO';   // e.g. 'lcp-media-quickbase/my-app'
+// ────────────────────────────────────────────────────────────
+
+function fetchRetry(url, n, d) {
+  return fetch(url).then(function(r) {
+    if (!r.ok) {
+      if (n > 0) return new Promise(function(ok){setTimeout(ok,d);}).then(function(){return fetchRetry(url,n-1,d*2);});
+      throw new Error(url.split('/').pop() + ' ' + r.status);
+    }
+    return r;
+  });
+}
+
+// Step 1: Get current version tag from version.json (@main, small file, short cache)
+fetchRetry('https://raw.githubusercontent.com/' + REPO + '/main/codepages/version.json?_=' + Date.now(), 2, 1000)
+  .then(function(r) { return r.json(); })
+  .catch(function() { return { version: 'main' }; })
+  .then(function(cfg) {
+    var v = cfg.version || 'main';
+    console.log('%c[LCP Dashboard] v' + v, 'color:#68B6E5;font-weight:bold');
+    var CDN = 'https://cdn.jsdelivr.net/gh/' + REPO + '@' + v + '/codepages';
+    document.getElementById('loader').lastChild.textContent = 'Loading ' + v + '...';
+
+    // Step 2: Load core files from the tagged CDN version
+    return Promise.all([
+      fetchRetry(CDN + '/shared.css',    2, 1000).then(function(r){return r.text();}),
+      fetchRetry(CDN + '/shared.js',     2, 1000).then(function(r){return r.text();}),
+      fetchRetry(CDN + '/dashboard.html',2, 1000).then(function(r){return r.text();})
+    ]).then(function(res) { return { cdn: CDN, res: res }; });
+  })
+  .then(function(d) {
+    var CDN = d.cdn, css = d.res[0], js = d.res[1], html = d.res[2];
+    var parser = new DOMParser();
+    var doc = parser.parseFromString(html, 'text/html');
+
+    var ps = ''; doc.querySelectorAll('style').forEach(function(s){ps += s.outerHTML;});
+
+    var scripts = [];
+    doc.body.querySelectorAll('script:not([src])').forEach(function(s){scripts.push(s.textContent);});
+
+    var srcScripts = [];
+    doc.body.querySelectorAll('script[src]').forEach(function(s){
+      var src = s.getAttribute('src');
+      if (src !== 'shared.js') srcScripts.push(src);
+    });
+
+    document.getElementById('loader').remove();
+    var el = document.createElement('style'); el.textContent = css; document.head.appendChild(el);
+    if (ps) document.head.insertAdjacentHTML('beforeend', ps);
+    document.body.innerHTML = '';
+
+    var s1 = document.createElement('script'); s1.textContent = js; document.body.appendChild(s1);
+    if (scripts[0]) { var s2 = document.createElement('script'); s2.textContent = scripts[0]; document.body.appendChild(s2); }
+
+    // Fetch all tab scripts in parallel, then execute in order
+    return Promise.all(srcScripts.map(function(src) {
+      return fetchRetry(CDN + '/' + src, 2, 1000).then(function(r){return r.text();});
+    })).then(function(tabCodes) {
+      tabCodes.forEach(function(code) {
+        var s = document.createElement('script'); s.textContent = code; document.body.appendChild(s);
+      });
+      for (var i = 1; i < scripts.length; i++) {
+        var s = document.createElement('script'); s.textContent = scripts[i]; document.body.appendChild(s);
+      }
+    });
+  }).catch(function(e) {
+    document.getElementById('loader').innerHTML =
+      '<div style="color:#ff4757;font-size:14px">Failed to load: ' + e.message + '</div>' +
+      '<div style="color:#565a6e;font-size:12px;margin-top:8px">Try refreshing (Ctrl+Shift+R)</div>';
+  });
+</script>
+</body>
+</html>
