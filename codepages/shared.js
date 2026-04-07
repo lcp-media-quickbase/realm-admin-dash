@@ -17,12 +17,12 @@ var LOGO_DARK  = '';  // White/light lockup shown in dark mode
 var LOGO_LIGHT = '';  // Color lockup shown in light mode
 
 // ─── QUICKBASE CONFIG ────────────────────────────────────────
-var QB_REALM = 'YOUR_REALM.quickbase.com';
+var QB_REALM = 'lcpmedia.quickbase.com';
 // Auto-detect realm when running on a QB Code Page
 if (typeof window !== 'undefined' && window.location.hostname.endsWith('.quickbase.com')) {
   QB_REALM = window.location.hostname;
 }
-var QB_APP = 'YOUR_APP_ID';   // App DBID from the QB URL (e.g. 'bu8tkk77g')
+var QB_APP = 'btnit6q26';   // App DBID from the QB URL
 
 // ─── TABLES ──────────────────────────────────────────────────
 // Add your QuickBase table DBIDs here.
@@ -32,7 +32,11 @@ var QB_APP = 'YOUR_APP_ID';   // App DBID from the QB URL (e.g. 'bu8tkk77g')
 //     projects: 'def67890',
 //   };
 var TABLES = {
-  // TODO: add your table IDs
+  projects:  'btnit6q27',
+  releases:  'bt8p9fz7x',
+  tasks:     'btnit6q3m',
+  realmLogs: 'bt8sr94e9',
+  apps:      'bu83a2h8x',
 };
 
 // ─── FIELDS ──────────────────────────────────────────────────
@@ -43,23 +47,67 @@ var TABLES = {
 //     PROJECTS: { id: 3, name: 6, stage: 7 },
 //   };
 var FIELD = {
-  // TODO: add your field ID maps
+  PROJECTS: {
+    name:          16,
+    status:        28,
+    priority:      27,
+    description:   63,
+    estStartDate:  23,
+    estEndDate:    24,
+  },
+  RELEASES: {
+    releaseName:        30,
+    relatedProject:     45,
+    userStories:         9,
+    inProduction:       31,
+    futureReleaseNotes: 44,
+    relatedApp:         54,
+    acceptanceCriteria:  8,
+    internalDocs:       33,
+  },
+  TASKS: {
+    id:              3,
+    name:            6,
+    assignedTo:    125,
+    status:         12,
+    priority:       13,
+    dateComplete:   99,
+    description:     7,
+    historyNotes:   55,
+    relatedProject: 48,
+    releasedRelease: 149,
+    system:        142,
+  },
+  REALM_LOGS: {
+    action:     11,
+    details:    10,
+    relatedApp: 50,
+  },
+  APPS: {
+    id:             6,
+    name:           7,
+    openToInternet:  8,
+  },
 };
 
 // ─── ROLES ───────────────────────────────────────────────────
 // Match role IDs to your QB app's role configuration.
 // Found in QuickBase: App Settings → Roles & Access
 var ROLE = {
-  VIEWER: 10,   // TODO: replace with your actual QB role IDs
-  ADMIN:  12,
-  // Add more roles as needed
+  ADMINISTRATOR:     12,   // TODO: confirm role IDs in QB App Settings → Roles & Access
+  EXECUTIVE:         13,
+  TEAM_MEMBER:       14,
+  LEADERSHIP_TEAM:   15,
+  TICKET_SUBMISSION: 16,
 };
 
 // Human-readable names used in the ViewAs dropdown and test banner
 var ROLE_NAMES = {
-  10: 'Viewer',
   12: 'Administrator',
-  // Add an entry for each role in ROLE
+  13: 'Executive',
+  14: 'TeamMember - Diana',
+  15: 'Leadership Team',
+  16: 'Ticket Submission',
 };
 
 console.log('%c[LCP Dashboard] ' + APP_NAME + ' ' + APP_VERSION, 'color:#68B6E5;font-weight:bold');
