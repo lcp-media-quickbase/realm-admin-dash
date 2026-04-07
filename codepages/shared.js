@@ -10,7 +10,7 @@
    ═══════════════════════════════════════════════════════════ */
 
 // ─── APP CONFIG ──────────────────────────────────────────────
-var APP_NAME    = 'Realm Admin';   // Shown in the app header
+var APP_NAME    = 'App Name';   // Shown in the app header
 var APP_VERSION = 'v1.0.0';
 // Logo image URLs — leave as empty strings for text-only header
 var LOGO_DARK  = '';  // White/light lockup shown in dark mode
