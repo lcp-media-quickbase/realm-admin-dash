@@ -94,20 +94,20 @@ var FIELD = {
 // Match role IDs to your QB app's role configuration.
 // Found in QuickBase: App Settings → Roles & Access
 var ROLE = {
-  ADMINISTRATOR:     12,   // TODO: confirm role IDs in QB App Settings → Roles & Access
-  EXECUTIVE:         13,
-  TEAM_MEMBER:       14,
-  LEADERSHIP_TEAM:   15,
-  TICKET_SUBMISSION: 16,
+  ADMINISTRATOR:     16,
+  TEAM_MEMBER:       24,
+  TICKET_SUBMISSION: 28,
+  EXECUTIVE:         29,
+  LEADERSHIP_TEAM:   30,
 };
 
 // Human-readable names used in the ViewAs dropdown and test banner
 var ROLE_NAMES = {
-  12: 'Administrator',
-  13: 'Executive',
-  14: 'TeamMember - Diana',
-  15: 'Leadership Team',
-  16: 'Ticket Submission',
+  16: 'Administrator',
+  24: 'TeamMember - Diana',
+  28: 'Ticket Submission',
+  29: 'Executive',
+  30: 'Leadership Team',
 };
 
 console.log('%c[LCP Dashboard] ' + APP_NAME + ' ' + APP_VERSION, 'color:#68B6E5;font-weight:bold');
