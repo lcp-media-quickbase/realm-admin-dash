@@ -76,7 +76,9 @@ var FIELD = {
     historyNotes:   55,
     relatedProject: 48,
     releasedRelease: 149,
-    system:        142,
+    system:         142,
+    startDate:      153,
+    estEndDate:     154,
   },
   REALM_LOGS: {
     action:     11,

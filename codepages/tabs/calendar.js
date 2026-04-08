@@ -1,30 +1,76 @@
 (function() {
 
-// ─── Azure Config (Microsoft Teams Calendar) ──────────────────
-// To enable Teams integration:
-//   1. Register an app at https://portal.azure.com → Azure Active Directory → App registrations
-//   2. Add a Single-page application redirect URI matching your QB Code Page URL
-//   3. Grant API permission: Microsoft Graph → Calendars.Read (delegated)
-//   4. Paste the Application (client) ID and Directory (tenant) ID below
-var AZURE_CLIENT_ID = 'YOUR-CLIENT-ID-HERE';
-var AZURE_TENANT_ID = 'YOUR-TENANT-ID-HERE';
-
 // ─── State ────────────────────────────────────────────────────
 var _projects    = [];
-var _teamsEvents = [];
-var _msalApp     = null;
-var _msalAccount = null;
+var _tasks       = [];
+var _icsEvents   = [];
 var _year        = new Date().getFullYear();
-var _month       = new Date().getMonth();   // 0-based
-var _dragId      = null;
+var _month       = new Date().getMonth();
+var _dragItem    = null;   // { type: 'task'|'project', id }
 
-// ─── Project color palette ────────────────────────────────────
-var PALETTE = ['#68B6E5','#e86060','#82c96a','#e8a860','#a06be8','#60d4c8','#e860a8','#e8d060'];
-function _color(id) { return PALETTE[id % PALETTE.length]; }
+// ─── Color scheme ─────────────────────────────────────────────
+var COLOR = {
+  task:    '#68B6E5',   // blue
+  project: '#82c96a',   // green
+  ics:     '#9b59b6',   // purple
+};
+var PROJECT_PALETTE = ['#82c96a','#e8a860','#e86060','#60d4c8','#e860a8','#e8d060','#6a9be8'];
+function _projectColor(id) { return PROJECT_PALETTE[id % PROJECT_PALETTE.length]; }
 
-// ─── Month/day labels ─────────────────────────────────────────
+// ─── Month labels ─────────────────────────────────────────────
 var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 var DOW         = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+// ─── ICS helpers (also exposed on window for home.js) ─────────
+function _getICSUrl()      { try { return localStorage.getItem('cal-ics-url') || ''; } catch(e) { return ''; } }
+function _setICSUrl(url)   { try { localStorage.setItem('cal-ics-url', url); } catch(e) {} }
+
+function _parseICSDate(val) {
+  var clean = val.replace(/Z$/, '').split('T')[0];  // YYYYMMDD
+  return clean.slice(0,4) + '-' + clean.slice(4,6) + '-' + clean.slice(6,8);
+}
+
+function _parseICS(text) {
+  var events = [];
+  // Unfold continuation lines
+  var lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  var unfolded = [];
+  lines.forEach(function(l) {
+    if ((l[0] === ' ' || l[0] === '\t') && unfolded.length) {
+      unfolded[unfolded.length-1] += l.slice(1);
+    } else { unfolded.push(l); }
+  });
+  var inEvent = false, ev = {};
+  unfolded.forEach(function(line) {
+    if (line === 'BEGIN:VEVENT') { inEvent = true; ev = {}; return; }
+    if (line === 'END:VEVENT')   { if (ev.start && ev.name) events.push(ev); inEvent = false; return; }
+    if (!inEvent) return;
+    var ci = line.indexOf(':');
+    if (ci === -1) return;
+    var key = line.slice(0, ci).split(';')[0];
+    var val = line.slice(ci + 1);
+    if      (key === 'DTSTART')  ev.start = _parseICSDate(val);
+    else if (key === 'DTEND')    ev.end   = _parseICSDate(val);
+    else if (key === 'SUMMARY')  ev.name  = val.replace(/\\,/g,',').replace(/\\n/g,' ').trim();
+  });
+  return events;
+}
+
+async function _fetchICS(url) {
+  if (!url) return [];
+  try {
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var text = await resp.text();
+    return _parseICS(text);
+  } catch(e) {
+    showToast('Could not load ICS calendar: ' + e.message, 'error');
+    return [];
+  }
+}
+
+// Expose so home.js can reuse
+window._icsUtils = { getICSUrl: _getICSUrl, fetchICS: _fetchICS };
 
 // ─── Tab Registration ─────────────────────────────────────────
 registerTab('calendar', {
@@ -35,17 +81,7 @@ registerTab('calendar', {
   onInit: async function() {
     var c = document.getElementById('tab-calendar');
     if (c) c.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
-    try {
-      await _loadData();
-      await _loadMSAL();
-      if (_msalApp) {
-        var accounts = _msalApp.getAllAccounts();
-        if (accounts.length > 0) {
-          _msalAccount = accounts[0];
-          await _fetchTeamsEvents().catch(function() {});
-        }
-      }
-    } catch(e) { /* render with whatever data loaded */ }
+    await _loadAll();
     _render();
   },
 
@@ -55,9 +91,15 @@ registerTab('calendar', {
 });
 
 // ─── Data Loading ─────────────────────────────────────────────
-async function _loadData() {
-  var rows = await qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null);
-  _projects = rows.map(function(r) {
+async function _loadAll() {
+  var icsUrl = _getICSUrl();
+  var results = await Promise.all([
+    qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
+    qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
+    _fetchICS(icsUrl),
+  ]);
+
+  _projects = results[0].map(function(r) {
     return {
       id:           val(r, 3),
       name:         val(r, FIELD.PROJECTS.name)         || '',
@@ -66,75 +108,38 @@ async function _loadData() {
       estEndDate:   val(r, FIELD.PROJECTS.estEndDate)   || '',
     };
   });
-}
 
-// ─── MSAL (Teams) ─────────────────────────────────────────────
-function _loadMSAL() {
-  return new Promise(function(resolve) {
-    if (window.msal) { _initMSALApp(); resolve(); return; }
-    var s = document.createElement('script');
-    s.src     = 'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js';
-    s.onload  = function() { _initMSALApp(); resolve(); };
-    s.onerror = function() { resolve(); };   // Teams is optional — don't block render
-    document.head.appendChild(s);
-  });
-}
-
-function _initMSALApp() {
-  if (!window.msal || AZURE_CLIENT_ID === 'YOUR-CLIENT-ID-HERE') return;
-  try {
-    _msalApp = new msal.PublicClientApplication({
-      auth: {
-        clientId:    AZURE_CLIENT_ID,
-        authority:   'https://login.microsoftonline.com/' + AZURE_TENANT_ID,
-        redirectUri: window.location.origin + window.location.pathname,
-      },
-      cache: { cacheLocation: 'sessionStorage' },
-    });
-  } catch(e) {}
-}
-
-async function _fetchTeamsEvents() {
-  if (!_msalApp || !_msalAccount) return;
-  var tokenResp = await _msalApp.acquireTokenSilent({
-    scopes: ['Calendars.Read'], account: _msalAccount,
-  }).catch(function() {
-    return _msalApp.acquireTokenPopup({ scopes: ['Calendars.Read'], account: _msalAccount });
-  });
-  var start = new Date(_year, _month, 1).toISOString();
-  var end   = new Date(_year, _month + 1, 0, 23, 59, 59).toISOString();
-  var resp  = await fetch(
-    'https://graph.microsoft.com/v1.0/me/events' +
-    '?$select=subject,start,end&$top=100' +
-    '&$filter=start/dateTime ge \'' + start + '\' and start/dateTime le \'' + end + '\'',
-    { headers: { Authorization: 'Bearer ' + tokenResp.accessToken } }
-  );
-  if (!resp.ok) return;
-  var data = await resp.json();
-  _teamsEvents = (data.value || []).map(function(ev) {
+  _tasks = results[1].map(function(r) {
     return {
-      name:  ev.subject || '(No title)',
-      start: ev.start.dateTime.split('T')[0],
-      end:   ev.end.dateTime.split('T')[0],
+      id:         val(r, 3),
+      name:       val(r, FIELD.TASKS.name)      || '',
+      status:     val(r, FIELD.TASKS.status)    || '',
+      priority:   val(r, FIELD.TASKS.priority)  || '',
+      assignedTo: val(r, FIELD.TASKS.assignedTo)|| '',
+      startDate:  val(r, FIELD.TASKS.startDate) || '',
+      estEndDate: val(r, FIELD.TASKS.estEndDate)|| '',
     };
   });
+
+  _icsEvents = results[2];
 }
 
-// ─── Events for a given date string ───────────────────────────
-function _eventsForDate(dateStr) {
+// ─── Events on a given date ───────────────────────────────────
+function _eventsForDate(ds) {
   var evs = [];
   _projects.forEach(function(p) {
     if (!p.estStartDate || !p.estEndDate) return;
-    var s = p.estStartDate.split('T')[0];
-    var e = p.estEndDate.split('T')[0];
-    if (dateStr >= s && dateStr <= e) {
-      evs.push({ name: p.name, color: _color(p.id), isStart: dateStr === s, isEnd: dateStr === e });
-    }
+    var s = p.estStartDate.split('T')[0], e = p.estEndDate.split('T')[0];
+    if (ds >= s && ds <= e) evs.push({ label: p.name, color: _projectColor(p.id), type: 'project' });
   });
-  _teamsEvents.forEach(function(ev) {
-    if (dateStr >= ev.start && dateStr <= ev.end) {
-      evs.push({ name: ev.name, color: '#6264a7' });
-    }
+  _tasks.forEach(function(t) {
+    if (!t.startDate || !t.estEndDate) return;
+    var s = t.startDate.split('T')[0], e = t.estEndDate.split('T')[0];
+    if (ds >= s && ds <= e) evs.push({ label: t.name, color: COLOR.task, type: 'task' });
+  });
+  _icsEvents.forEach(function(ev) {
+    var s = ev.start, e = ev.end || ev.start;
+    if (ds >= s && ds <= e) evs.push({ label: ev.name, color: COLOR.ics, type: 'ics' });
   });
   return evs;
 }
@@ -145,11 +150,9 @@ function _render() {
   if (!c) return;
 
   var today    = new Date();
-  var todayStr = today.getFullYear() + '-' +
-                 String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                 String(today.getDate()).padStart(2, '0');
+  var todayStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
 
-  // Build calendar cells
+  // Build grid cells
   var firstDay = new Date(_year, _month, 1);
   var lastDay  = new Date(_year, _month + 1, 0);
   var cells    = [];
@@ -157,167 +160,155 @@ function _render() {
   for (var d = 1; d <= lastDay.getDate(); d++) cells.push(new Date(_year, _month, d));
   while (cells.length % 7 !== 0) cells.push(null);
 
-  var unscheduled = _projects.filter(function(p) { return !p.estStartDate; });
-  var scheduled   = _projects.filter(function(p) { return !!p.estStartDate; });
-
-  // Teams button
-  var teamsBtn = _msalAccount
-    ? '<button class="btn btn-sm btn-primary" onclick="calTeamsRefresh()" style="background:#6264a7;border-color:#6264a7">⟳ Teams</button>'
-    : (_msalApp
-        ? '<button class="btn btn-sm" onclick="calTeamsSignIn()" style="border-color:#6264a7;color:#6264a7">⊞ Connect Teams</button>'
-        : '');
+  var unscheduledTasks    = _tasks.filter(function(t)    { return !t.startDate; });
+  var unscheduledProjects = _projects.filter(function(p) { return !p.estStartDate; });
+  var icsConfigured       = !!_getICSUrl();
 
   c.innerHTML =
-    // ── Topbar ──
+    // Topbar
     '<div class="topbar">' +
       '<div class="topbar-left" style="gap:6px">' +
         '<button class="btn btn-sm" onclick="calPrevMonth()">‹</button>' +
-        '<span style="font-size:14px;font-weight:600;min-width:150px;text-align:center">' +
+        '<span style="font-size:14px;font-weight:600;min-width:160px;text-align:center">' +
           MONTH_NAMES[_month] + ' ' + _year +
         '</span>' +
         '<button class="btn btn-sm" onclick="calNextMonth()">›</button>' +
       '</div>' +
       '<div class="topbar-right">' +
-        teamsBtn +
+        '<button class="btn btn-sm" onclick="calICSSettings()" title="Configure calendar feed" ' +
+          'style="' + (icsConfigured ? 'border-color:var(--accent);color:var(--accent)' : '') + '">' +
+          (icsConfigured ? '● Calendar Feed' : '+ Calendar Feed') +
+        '</button>' +
         '<button class="btn btn-sm" onclick="calRefresh()">↺ Refresh</button>' +
       '</div>' +
     '</div>' +
 
-    // ── Body: left panel + calendar ──
     '<div style="display:flex;flex:1;overflow:hidden">' +
 
-    // Left panel — unscheduled projects (drag to calendar to set dates)
+    // Left panel
     '<div style="width:220px;flex-shrink:0;border-right:1px solid var(--border);' +
-      'overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px">' +
-      '<div style="font-size:11px;font-weight:600;color:var(--text-muted);' +
-        'text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">' +
-        'Unscheduled (' + unscheduled.length + ')' +
-      '</div>' +
-      '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">' +
-        'Drag a project onto a day, or drag across days to set a range.' +
-      '</div>' +
-      (unscheduled.length === 0
-        ? '<div style="font-size:12px;color:var(--text-dim)">All projects have dates set.</div>'
-        : unscheduled.map(function(p) {
-            var col = _color(p.id);
-            return '<div draggable="true" data-id="' + p.id + '" ' +
-              'ondragstart="calDragStart(event,' + p.id + ')" ' +
-              'style="padding:8px 10px;border-radius:6px;border:1px solid var(--border);' +
-                'border-left:3px solid ' + col + ';background:var(--surface);' +
-                'font-size:12px;color:var(--text);cursor:grab;user-select:none">' +
-              escapeHtml(p.name) +
-            '</div>';
-          }).join('')
-      ) +
+      'overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:4px">' +
 
-      // Also show scheduled projects for re-scheduling via calendar drag
-      (scheduled.length > 0
-        ? '<div style="font-size:11px;font-weight:600;color:var(--text-muted);' +
-            'text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 4px">' +
-            'Scheduled (' + scheduled.length + ')' +
+      '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">' +
+        'Drag to a day to set dates.<br>Drag across days to set a range.' +
+      '</div>' +
+
+      // Unscheduled Tasks
+      (unscheduledTasks.length > 0
+        ? '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:4px 0">' +
+            'Tasks (' + unscheduledTasks.length + ')' +
           '</div>' +
-          scheduled.map(function(p) {
-            var col = _color(p.id);
-            return '<div draggable="true" data-id="' + p.id + '" ' +
-              'ondragstart="calDragStart(event,' + p.id + ')" ' +
-              'style="padding:8px 10px;border-radius:6px;border:1px solid var(--border);' +
-                'border-left:3px solid ' + col + ';background:var(--surface);' +
-                'font-size:12px;color:var(--text);cursor:grab;user-select:none;opacity:0.7">' +
-              escapeHtml(p.name) + '<br>' +
-              '<span style="font-size:10px;color:var(--text-dim)">' +
-                (p.estStartDate || '').split('T')[0] + ' → ' + (p.estEndDate || '').split('T')[0] +
-              '</span>' +
-            '</div>';
+          unscheduledTasks.map(function(t) {
+            return '<div draggable="true" ondragstart="calDragStart(event,\'task\',' + t.id + ')" ' +
+              'style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);' +
+                'border-left:3px solid ' + COLOR.task + ';background:var(--surface);' +
+                'font-size:12px;color:var(--text);cursor:grab;user-select:none;margin-bottom:2px">' +
+              escapeHtml(t.name) + '</div>';
           }).join('')
         : '') +
+
+      // Unscheduled Projects
+      (unscheduledProjects.length > 0
+        ? '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:8px 0 4px">' +
+            'Projects (' + unscheduledProjects.length + ')' +
+          '</div>' +
+          unscheduledProjects.map(function(p) {
+            var col = _projectColor(p.id);
+            return '<div draggable="true" ondragstart="calDragStart(event,\'project\',' + p.id + ')" ' +
+              'style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);' +
+                'border-left:3px solid ' + col + ';background:var(--surface);' +
+                'font-size:12px;color:var(--text);cursor:grab;user-select:none;margin-bottom:2px">' +
+              escapeHtml(p.name) + '</div>';
+          }).join('')
+        : '') +
+
+      // Scheduled items (re-drag to reschedule)
+      '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:8px 0 4px">Scheduled</div>' +
+      _tasks.filter(function(t){ return t.startDate; }).concat(
+        _projects.filter(function(p){ return p.estStartDate; }).map(function(p) {
+          return { id: p.id, name: p.name, startDate: p.estStartDate, estEndDate: p.estEndDate, _type: 'project', _color: _projectColor(p.id) };
+        })
+      ).map(function(item) {
+        var isProj = !!item._type;
+        var col    = isProj ? item._color : COLOR.task;
+        var type   = isProj ? 'project' : 'task';
+        return '<div draggable="true" ondragstart="calDragStart(event,\'' + type + '\',' + item.id + ')" ' +
+          'style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);' +
+            'border-left:3px solid ' + col + ';background:var(--surface);' +
+            'font-size:11px;color:var(--text);cursor:grab;user-select:none;margin-bottom:2px;opacity:0.75">' +
+          escapeHtml(item.name) + '<br>' +
+          '<span style="color:var(--text-dim);font-size:10px">' +
+            (item.startDate||'').split('T')[0] + ' → ' + (item.estEndDate||'').split('T')[0] +
+          '</span>' +
+        '</div>';
+      }).join('') +
+
     '</div>' +
 
     // Calendar area
     '<div style="flex:1;overflow:auto;padding:16px">' +
 
-    // Day-of-week headers
+    // DOW headers
     '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px">' +
-    DOW.map(function(label) {
-      return '<div style="text-align:center;font-size:11px;font-weight:600;' +
-        'color:var(--text-muted);padding:4px 0">' + label + '</div>';
-    }).join('') +
-    '</div>' +
+    DOW.map(function(l) {
+      return '<div style="text-align:center;font-size:11px;font-weight:600;color:var(--text-muted);padding:4px 0">' + l + '</div>';
+    }).join('') + '</div>' +
 
-    // Calendar grid
+    // Grid
     '<div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">' +
     cells.map(function(date) {
-      if (!date) {
-        return '<div style="min-height:96px;background:var(--bg);border-radius:6px;' +
-          'border:1px solid transparent;opacity:0.3"></div>';
-      }
-      var ds  = date.getFullYear() + '-' +
-                String(date.getMonth() + 1).padStart(2, '0') + '-' +
-                String(date.getDate()).padStart(2, '0');
+      if (!date) return '<div style="min-height:100px;background:var(--bg);border-radius:6px;border:1px solid transparent;opacity:0.3"></div>';
+      var ds  = date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
       var evs = _eventsForDate(ds);
       var isToday = ds === todayStr;
-
       return '<div class="cal-day" data-date="' + ds + '" ' +
-        'ondragover="event.preventDefault()" ' +
-        'ondrop="calDrop(event,\'' + ds + '\')" ' +
-        'style="min-height:96px;background:var(--surface);border-radius:6px;padding:5px;' +
+        'ondragover="event.preventDefault()" ondrop="calDrop(event,\'' + ds + '\')" ' +
+        'style="min-height:100px;background:var(--surface);border-radius:6px;padding:5px;' +
           'border:1px solid ' + (isToday ? 'var(--accent)' : 'var(--border)') + ';' +
           'cursor:crosshair;user-select:none;box-sizing:border-box;overflow:hidden">' +
-
-        '<div style="font-size:12px;font-weight:' + (isToday ? '700' : '500') + ';' +
-          'color:' + (isToday ? 'var(--accent)' : 'var(--text)') + ';margin-bottom:3px">' +
-          date.getDate() +
-        '</div>' +
-
+        '<div style="font-size:12px;font-weight:' + (isToday ? '700':'500') + ';' +
+          'color:' + (isToday ? 'var(--accent)':'var(--text)') + ';margin-bottom:3px">' + date.getDate() + '</div>' +
         evs.map(function(ev) {
           return '<div style="font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;' +
             'background:' + ev.color + '28;border-left:2px solid ' + ev.color + ';' +
-            'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
-            'line-height:1.4" title="' + escapeHtml(ev.name) + '">' +
-            escapeHtml(ev.name) +
-          '</div>';
+            'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4" ' +
+            'title="' + escapeHtml(ev.label) + '">' + escapeHtml(ev.label) + '</div>';
         }).join('') +
-
       '</div>';
-    }).join('') +
-    '</div>' +   // end cal-grid
+    }).join('') + '</div>' +  // end grid
 
     // Legend
-    (scheduled.length > 0 || _teamsEvents.length > 0
-      ? '<div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">' +
-          '<span style="font-size:11px;color:var(--text-dim)">Legend:</span>' +
-          scheduled.map(function(p) {
-            return '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
-              '<div style="width:10px;height:10px;border-radius:2px;background:' + _color(p.id) + '"></div>' +
-              escapeHtml(p.name) +
-            '</div>';
-          }).join('') +
-          (_teamsEvents.length > 0
-            ? '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
-                '<div style="width:10px;height:10px;border-radius:2px;background:#6264a7"></div>Teams' +
-              '</div>'
-            : '') +
-        '</div>'
-      : '') +
+    '<div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">' +
+      '<span style="font-size:11px;color:var(--text-dim)">Legend:</span>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
+        '<div style="width:10px;height:10px;border-radius:2px;background:' + COLOR.task + '"></div>Tasks' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
+        '<div style="width:10px;height:10px;border-radius:2px;background:' + COLOR.project + '"></div>Projects' +
+      '</div>' +
+      (_icsEvents.length > 0
+        ? '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
+            '<div style="width:10px;height:10px;border-radius:2px;background:' + COLOR.ics + '"></div>Calendar Feed' +
+          '</div>'
+        : '') +
+    '</div>' +
 
     '</div>' +   // end calendar area
-    '</div>';    // end body flex row
+    '</div>';    // end body row
 
   _initDragListeners();
 }
 
-// ─── Multi-day drag (mousedown → mousemove → mouseup) ─────────
+// ─── Multi-day drag (mousedown → drag across → mouseup) ───────
 function _initDragListeners() {
   var grid = document.getElementById('cal-grid');
   if (!grid) return;
-
   grid.addEventListener('mousedown', function(e) {
     var cell = e.target.closest('.cal-day[data-date]');
     if (!cell || e.button !== 0) return;
-    if (e.target.closest('[draggable="true"]')) return;  // let HTML5 drag handle it
+    if (e.target.closest('[draggable="true"]')) return;
     e.preventDefault();
-
-    var startDate = cell.dataset.date;
-    var endDate   = startDate;
+    var startDate = cell.dataset.date, endDate = startDate;
     _highlightRange(startDate, endDate);
 
     function onMove(e2) {
@@ -325,158 +316,170 @@ function _initDragListeners() {
       var c2 = el && el.closest('.cal-day[data-date]');
       if (c2) { endDate = c2.dataset.date; _highlightRange(startDate, endDate); }
     }
-
     function onUp() {
       document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup',   onUp);
+      document.removeEventListener('mouseup', onUp);
       _clearHighlight();
       var s = startDate <= endDate ? startDate : endDate;
       var e = startDate <= endDate ? endDate   : startDate;
-      _promptProjectForRange(s, e);
+      _promptItemForRange(s, e);
     }
-
     document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup',   onUp);
+    document.addEventListener('mouseup', onUp);
   });
 }
 
-function _highlightRange(startStr, endStr) {
-  var s = startStr <= endStr ? startStr : endStr;
-  var e = startStr <= endStr ? endStr   : startStr;
+function _highlightRange(s, e) {
+  var lo = s <= e ? s : e, hi = s <= e ? e : s;
   document.querySelectorAll('.cal-day[data-date]').forEach(function(cell) {
-    var inRange = cell.dataset.date >= s && cell.dataset.date <= e;
-    cell.style.background   = inRange ? 'var(--accent-dim)'  : '';
-    cell.style.borderColor  = inRange ? 'var(--accent)'      : '';
+    var inRange = cell.dataset.date >= lo && cell.dataset.date <= hi;
+    cell.style.background  = inRange ? 'var(--accent-dim)' : '';
+    cell.style.borderColor = inRange ? 'var(--accent)'     : '';
   });
 }
-
 function _clearHighlight() {
   document.querySelectorAll('.cal-day[data-date]').forEach(function(cell) {
-    cell.style.background  = '';
-    cell.style.borderColor = '';
+    cell.style.background = cell.style.borderColor = '';
   });
 }
 
-function _promptProjectForRange(startStr, endStr) {
-  if (_projects.length === 0) { showToast('No projects available', 'info'); return; }
+// Modal: pick which task or project to assign the dragged range to
+function _promptItemForRange(startStr, endStr) {
+  var allItems = _tasks.map(function(t){ return { type:'task', id:t.id, label:'[Task] '+t.name }; })
+    .concat(_projects.map(function(p){ return { type:'project', id:p.id, label:'[Project] '+p.name }; }));
+  if (!allItems.length) { showToast('No items available', 'info'); return; }
 
   var modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;' +
-    'display:flex;align-items:center;justify-content:center';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
   modal.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;' +
-      'padding:24px;width:340px;display:flex;flex-direction:column;gap:14px">' +
-      '<div style="font-size:14px;font-weight:600;color:var(--text)">Set Project Dates</div>' +
-      '<div style="font-size:12px;color:var(--text-muted)">' +
-        (startStr === endStr ? startStr : startStr + '  →  ' + endStr) +
-      '</div>' +
-      '<select id="cal-proj-select" style="background:var(--bg);color:var(--text);' +
-        'border:1px solid var(--border);border-radius:6px;padding:8px;' +
-        'font-family:inherit;font-size:13px">' +
-        '<option value="">— Select a project —</option>' +
-        _projects.map(function(p) {
-          return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
-        }).join('') +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;width:360px;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:14px;font-weight:600;color:var(--text)">Set Dates</div>' +
+      '<div style="font-size:12px;color:var(--text-muted)">' + (startStr === endStr ? startStr : startStr + '  →  ' + endStr) + '</div>' +
+      '<select id="cal-range-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-family:inherit;font-size:13px">' +
+        '<option value="">— Select task or project —</option>' +
+        allItems.map(function(it){ return '<option value="' + it.type + ':' + it.id + '">' + escapeHtml(it.label) + '</option>'; }).join('') +
       '</select>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-        '<button class="btn btn-sm" id="cal-modal-cancel">Cancel</button>' +
-        '<button class="btn btn-sm btn-primary" id="cal-modal-confirm">Set Dates</button>' +
+        '<button class="btn btn-sm" id="cal-range-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="cal-range-ok">Set Dates</button>' +
       '</div>' +
     '</div>';
-
   document.body.appendChild(modal);
-  document.getElementById('cal-modal-cancel').onclick  = function() { document.body.removeChild(modal); };
-  document.getElementById('cal-modal-confirm').onclick = function() {
-    var id = parseInt(document.getElementById('cal-proj-select').value);
-    if (!id) { showToast('Please select a project', 'info'); return; }
+  document.getElementById('cal-range-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('cal-range-ok').onclick = function() {
+    var val = document.getElementById('cal-range-select').value;
+    if (!val) { showToast('Please select an item', 'info'); return; }
     document.body.removeChild(modal);
-    _saveProjectDates(id, startStr, endStr);
+    var parts = val.split(':');
+    _saveDates(parts[0], parseInt(parts[1]), startStr, endStr);
   };
 }
 
 // ─── HTML5 drag from left panel ───────────────────────────────
-function calDragStart(e, projectId) {
-  _dragId = projectId;
-  e.dataTransfer.setData('text/plain', String(projectId));
+function calDragStart(e, type, id) {
+  _dragItem = { type: type, id: id };
+  e.dataTransfer.setData('text/plain', type + ':' + id);
   e.dataTransfer.effectAllowed = 'move';
 }
-
 function calDrop(e, dateStr) {
   e.preventDefault();
-  var id = _dragId || parseInt(e.dataTransfer.getData('text/plain'));
-  if (!id) return;
-  _dragId = null;
-  _saveProjectDates(id, dateStr, dateStr);
+  var raw  = e.dataTransfer.getData('text/plain') || '';
+  var item = _dragItem || (raw ? { type: raw.split(':')[0], id: parseInt(raw.split(':')[1]) } : null);
+  _dragItem = null;
+  if (!item) return;
+  _saveDates(item.type, item.id, dateStr, dateStr);
 }
 
-// ─── Save project dates to QB ─────────────────────────────────
-async function _saveProjectDates(projectId, startStr, endStr) {
+// ─── Save dates to QB ─────────────────────────────────────────
+async function _saveDates(type, id, startStr, endStr) {
   try {
-    await qbUpsert(TABLES.projects, [{
-      3:                             { value: projectId },
-      [FIELD.PROJECTS.estStartDate]: { value: startStr },
-      [FIELD.PROJECTS.estEndDate]:   { value: endStr },
-    }], [3]);
-
-    var proj = _projects.find(function(p) { return p.id === projectId; });
-    if (proj) { proj.estStartDate = startStr; proj.estEndDate = endStr; }
-
-    showToast('Dates updated', 'success');
+    if (type === 'task') {
+      await qbUpsert(TABLES.tasks, [{
+        3:                          { value: id },
+        [FIELD.TASKS.startDate]:    { value: startStr },
+        [FIELD.TASKS.estEndDate]:   { value: endStr },
+      }], [3]);
+      var t = _tasks.find(function(x){ return x.id === id; });
+      if (t) { t.startDate = startStr; t.estEndDate = endStr; }
+    } else {
+      await qbUpsert(TABLES.projects, [{
+        3:                               { value: id },
+        [FIELD.PROJECTS.estStartDate]:   { value: startStr },
+        [FIELD.PROJECTS.estEndDate]:     { value: endStr },
+      }], [3]);
+      var p = _projects.find(function(x){ return x.id === id; });
+      if (p) { p.estStartDate = startStr; p.estEndDate = endStr; }
+    }
+    showToast('Dates saved', 'success');
     _render();
   } catch(e) {
     showToast('Failed to save: ' + e.message, 'error');
   }
 }
 
-// ─── Month navigation ─────────────────────────────────────────
+// ─── ICS Settings modal ───────────────────────────────────────
+function calICSSettings() {
+  var current = _getICSUrl();
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px;width:480px;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:14px;font-weight:600;color:var(--text)">Calendar Feed (ICS)</div>' +
+      '<div style="font-size:12px;color:var(--text-muted);line-height:1.6">' +
+        'To get your Outlook/Teams ICS URL:<br>' +
+        '1. Go to Outlook on the web (outlook.office365.com)<br>' +
+        '2. Settings → View all Outlook settings → Calendar → Shared calendars<br>' +
+        '3. Under "Publish a calendar" → select calendar → Can view all details → Publish<br>' +
+        '4. Copy the <strong>ICS</strong> link and paste it below.' +
+      '</div>' +
+      '<input id="cal-ics-input" type="text" placeholder="https://outlook.office365.com/owa/calendar/..." ' +
+        'value="' + escapeHtml(current) + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        (current ? '<button class="btn btn-sm btn-danger" id="cal-ics-clear">Remove</button>' : '') +
+        '<button class="btn btn-sm" id="cal-ics-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="cal-ics-save">Save &amp; Refresh</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  document.getElementById('cal-ics-cancel').onclick = function() { document.body.removeChild(modal); };
+  if (current) document.getElementById('cal-ics-clear').onclick = function() {
+    _setICSUrl('');
+    document.body.removeChild(modal);
+    calRefresh();
+  };
+  document.getElementById('cal-ics-save').onclick = async function() {
+    var url = document.getElementById('cal-ics-input').value.trim();
+    _setICSUrl(url);
+    document.body.removeChild(modal);
+    calRefresh();
+  };
+}
+
+// ─── Navigation ───────────────────────────────────────────────
 function calPrevMonth() {
-  _month--;
-  if (_month < 0) { _month = 11; _year--; }
-  if (_msalAccount) _fetchTeamsEvents().catch(function(){}).then(function(){ _render(); });
-  else _render();
+  _month--; if (_month < 0)  { _month = 11; _year--; }
+  _render();
 }
-
 function calNextMonth() {
-  _month++;
-  if (_month > 11) { _month = 0; _year++; }
-  if (_msalAccount) _fetchTeamsEvents().catch(function(){}).then(function(){ _render(); });
-  else _render();
+  _month++; if (_month > 11) { _month = 0;  _year++; }
+  _render();
 }
-
 async function calRefresh() {
   var c = document.getElementById('tab-calendar');
   if (c) c.innerHTML = '<div class="loading"><div class="spinner"></div> Refreshing...</div>';
-  await _loadData();
-  if (_msalAccount) await _fetchTeamsEvents().catch(function(){});
+  await _loadAll();
   _render();
-}
-
-async function calTeamsSignIn() {
-  if (!_msalApp) { showToast('Azure credentials not configured — see calendar.js', 'error'); return; }
-  try {
-    var result = await _msalApp.loginPopup({ scopes: ['Calendars.Read', 'User.Read'] });
-    _msalAccount = result.account;
-    await _fetchTeamsEvents();
-    _render();
-    showToast('Teams calendar connected', 'success');
-  } catch(e) {
-    showToast('Teams sign-in failed: ' + e.message, 'error');
-  }
-}
-
-async function calTeamsRefresh() {
-  await _fetchTeamsEvents().catch(function(){});
-  _render();
-  showToast('Teams events refreshed', 'success');
 }
 
 // ─── Window exports ───────────────────────────────────────────
-window.calPrevMonth    = calPrevMonth;
-window.calNextMonth    = calNextMonth;
-window.calRefresh      = calRefresh;
-window.calTeamsSignIn  = calTeamsSignIn;
-window.calTeamsRefresh = calTeamsRefresh;
-window.calDragStart    = calDragStart;
-window.calDrop         = calDrop;
+window.calPrevMonth   = calPrevMonth;
+window.calNextMonth   = calNextMonth;
+window.calRefresh     = calRefresh;
+window.calICSSettings = calICSSettings;
+window.calDragStart   = calDragStart;
+window.calDrop        = calDrop;
 
 })();
