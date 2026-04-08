@@ -3,6 +3,7 @@
 // ─── State ────────────────────────────────────────────────────
 var _projects    = [];
 var _tasks       = [];
+var _releases    = [];
 var _icsEvents   = [];
 var _year        = new Date().getFullYear();
 var _month       = new Date().getMonth();
@@ -12,6 +13,7 @@ var _dragItem    = null;   // { type: 'task'|'project', id }
 var COLOR = {
   task:    '#68B6E5',   // blue
   project: '#82c96a',   // green
+  release: '#e8a860',   // orange
   ics:     '#9b59b6',   // purple
 };
 var PROJECT_PALETTE = ['#82c96a','#e8a860','#e86060','#60d4c8','#e860a8','#e8d060','#6a9be8'];
@@ -94,8 +96,9 @@ registerTab('calendar', {
 async function _loadAll() {
   var icsUrl = _getICSUrl();
   var results = await Promise.all([
-    qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
-    qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
+    qbQueryAll(TABLES.projects,  [3, 16, 28, 27, 23, 24], null),
+    qbQueryAll(TABLES.tasks,     [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
+    qbQueryAll(TABLES.releases,  [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     _fetchICS(icsUrl),
   ]);
 
@@ -121,7 +124,16 @@ async function _loadAll() {
     };
   });
 
-  _icsEvents = results[2];
+  _releases = results[2].map(function(r) {
+    return {
+      id:        val(r, 3),
+      name:      val(r, FIELD.RELEASES.releaseName) || '',
+      startDate: val(r, FIELD.RELEASES.startDate)   || '',
+      estEndDate:val(r, FIELD.RELEASES.estEndDate)  || '',
+    };
+  });
+
+  _icsEvents = results[3];
 }
 
 // ─── Events on a given date ───────────────────────────────────
@@ -136,6 +148,11 @@ function _eventsForDate(ds) {
     if (!t.startDate || !t.estEndDate) return;
     var s = t.startDate.split('T')[0], e = t.estEndDate.split('T')[0];
     if (ds >= s && ds <= e) evs.push({ label: t.name, color: COLOR.task, type: 'task' });
+  });
+  _releases.forEach(function(r) {
+    if (!r.startDate || !r.estEndDate) return;
+    var s = r.startDate.split('T')[0], e = r.estEndDate.split('T')[0];
+    if (ds >= s && ds <= e) evs.push({ label: r.name, color: COLOR.release, type: 'release' });
   });
   _icsEvents.forEach(function(ev) {
     var s = ev.start, e = ev.end || ev.start;
@@ -162,6 +179,7 @@ function _render() {
 
   var unscheduledTasks    = _tasks.filter(function(t)    { return !t.startDate; });
   var unscheduledProjects = _projects.filter(function(p) { return !p.estStartDate; });
+  var unscheduledReleases = _releases.filter(function(r) { return !r.startDate; });
   var icsConfigured       = !!_getICSUrl();
 
   c.innerHTML =
@@ -222,16 +240,35 @@ function _render() {
           }).join('')
         : '') +
 
+      // Unscheduled Releases
+      (unscheduledReleases.length > 0
+        ? '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:8px 0 4px">' +
+            'Releases (' + unscheduledReleases.length + ')' +
+          '</div>' +
+          unscheduledReleases.map(function(r) {
+            return '<div draggable="true" ondragstart="calDragStart(event,\'release\',' + r.id + ')" ' +
+              'style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);' +
+                'border-left:3px solid ' + COLOR.release + ';background:var(--surface);' +
+                'font-size:12px;color:var(--text);cursor:grab;user-select:none;margin-bottom:2px">' +
+              escapeHtml(r.name) + '</div>';
+          }).join('')
+        : '') +
+
       // Scheduled items (re-drag to reschedule)
       '<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:8px 0 4px">Scheduled</div>' +
       _tasks.filter(function(t){ return t.startDate; }).concat(
         _projects.filter(function(p){ return p.estStartDate; }).map(function(p) {
           return { id: p.id, name: p.name, startDate: p.estStartDate, estEndDate: p.estEndDate, _type: 'project', _color: _projectColor(p.id) };
         })
+      ).concat(
+        _releases.filter(function(r){ return r.startDate; }).map(function(r) {
+          return { id: r.id, name: r.name, startDate: r.startDate, estEndDate: r.estEndDate, _type: 'release', _color: COLOR.release };
+        })
       ).map(function(item) {
-        var isProj = !!item._type;
-        var col    = isProj ? item._color : COLOR.task;
-        var type   = isProj ? 'project' : 'task';
+        var isProj = item._type === 'project';
+        var isRel  = item._type === 'release';
+        var col    = isProj ? item._color : isRel ? COLOR.release : COLOR.task;
+        var type   = item._type || 'task';
         return '<div draggable="true" ondragstart="calDragStart(event,\'' + type + '\',' + item.id + ')" ' +
           'style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);' +
             'border-left:3px solid ' + col + ';background:var(--surface);' +
@@ -285,6 +322,9 @@ function _render() {
       '</div>' +
       '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
         '<div style="width:10px;height:10px;border-radius:2px;background:' + COLOR.project + '"></div>Projects' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
+        '<div style="width:10px;height:10px;border-radius:2px;background:' + COLOR.release + '"></div>Releases' +
       '</div>' +
       (_icsEvents.length > 0
         ? '<div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)">' +
@@ -346,7 +386,8 @@ function _clearHighlight() {
 // Modal: pick which task or project to assign the dragged range to
 function _promptItemForRange(startStr, endStr) {
   var allItems = _tasks.map(function(t){ return { type:'task', id:t.id, label:'[Task] '+t.name }; })
-    .concat(_projects.map(function(p){ return { type:'project', id:p.id, label:'[Project] '+p.name }; }));
+    .concat(_projects.map(function(p){ return { type:'project', id:p.id, label:'[Project] '+p.name }; }))
+    .concat(_releases.map(function(r){ return { type:'release', id:r.id, label:'[Release] '+r.name }; }));
   if (!allItems.length) { showToast('No items available', 'info'); return; }
 
   var modal = document.createElement('div');
@@ -395,17 +436,25 @@ async function _saveDates(type, id, startStr, endStr) {
   try {
     if (type === 'task') {
       await qbUpsert(TABLES.tasks, [{
-        3:                          { value: id },
-        [FIELD.TASKS.startDate]:    { value: startStr },
-        [FIELD.TASKS.estEndDate]:   { value: endStr },
+        3:                        { value: id },
+        [FIELD.TASKS.startDate]:  { value: startStr },
+        [FIELD.TASKS.estEndDate]: { value: endStr },
       }], [3]);
       var t = _tasks.find(function(x){ return x.id === id; });
       if (t) { t.startDate = startStr; t.estEndDate = endStr; }
+    } else if (type === 'release') {
+      await qbUpsert(TABLES.releases, [{
+        3:                           { value: id },
+        [FIELD.RELEASES.startDate]:  { value: startStr },
+        [FIELD.RELEASES.estEndDate]: { value: endStr },
+      }], [3]);
+      var r = _releases.find(function(x){ return x.id === id; });
+      if (r) { r.startDate = startStr; r.estEndDate = endStr; }
     } else {
       await qbUpsert(TABLES.projects, [{
-        3:                               { value: id },
-        [FIELD.PROJECTS.estStartDate]:   { value: startStr },
-        [FIELD.PROJECTS.estEndDate]:     { value: endStr },
+        3:                             { value: id },
+        [FIELD.PROJECTS.estStartDate]: { value: startStr },
+        [FIELD.PROJECTS.estEndDate]:   { value: endStr },
       }], [3]);
       var p = _projects.find(function(x){ return x.id === id; });
       if (p) { p.estStartDate = startStr; p.estEndDate = endStr; }

@@ -64,6 +64,8 @@ var FIELD = {
     relatedApp:         54,
     acceptanceCriteria:  8,
     internalDocs:       33,
+    startDate:          59,
+    estEndDate:         60,
   },
   TASKS: {
     id:              3,

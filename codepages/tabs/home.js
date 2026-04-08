@@ -3,6 +3,7 @@
 // ─── State ────────────────────────────────────────────────────
 var _tasks    = [];
 var _projects = [];
+var _releases = [];
 var _icsEvs   = [];
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -55,6 +56,11 @@ function _itemsForDate(ds) {
     if (s && e && ds >= s && ds <= e) items.push({ type:'project', label: p.name, color:'#82c96a' });
   });
 
+  _releases.forEach(function(r) {
+    var s = _toDateStr(r.startDate), e = _toDateStr(r.estEndDate);
+    if (s && e && ds >= s && ds <= e) items.push({ type:'release', label: r.name, color:'#e8a860' });
+  });
+
   _icsEvs.forEach(function(ev) {
     var s = ev.start, e = ev.end || ev.start;
     if (ds >= s && ds <= e) items.push({ type:'ics', label: ev.name, color:'#9b59b6' });
@@ -88,8 +94,20 @@ async function _loadAll() {
   var results = await Promise.all([
     qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
     qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
+    qbQueryAll(TABLES.releases, [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
   ]);
+
+  _releases = results[2].map(function(r) {
+    return {
+      id:        val(r, 3),
+      name:      val(r, FIELD.RELEASES.releaseName) || '',
+      startDate: val(r, FIELD.RELEASES.startDate)   || '',
+      estEndDate:val(r, FIELD.RELEASES.estEndDate)  || '',
+    };
+  });
+
+  _icsEvs = results[3];
 
   _tasks = results[0].map(function(r) {
     return {
@@ -114,7 +132,6 @@ async function _loadAll() {
     };
   });
 
-  _icsEvs = results[2];
 }
 
 // ─── Render ───────────────────────────────────────────────────
