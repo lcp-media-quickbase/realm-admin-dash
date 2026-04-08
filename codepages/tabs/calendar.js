@@ -24,8 +24,10 @@ var MONTH_NAMES = ['January','February','March','April','May','June','July','Aug
 var DOW         = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 // ─── ICS helpers (also exposed on window for home.js) ─────────
-function _getICSUrl()      { try { return localStorage.getItem('cal-ics-url') || ''; } catch(e) { return ''; } }
-function _setICSUrl(url)   { try { localStorage.setItem('cal-ics-url', url); } catch(e) {} }
+function _getICSUrl()        { try { return localStorage.getItem('cal-ics-url')   || ''; } catch(e) { return ''; } }
+function _setICSUrl(url)     { try { localStorage.setItem('cal-ics-url', url);          } catch(e) {} }
+function _getProxyUrl()      { try { return localStorage.getItem('cal-proxy-url') || ''; } catch(e) { return ''; } }
+function _setProxyUrl(url)   { try { localStorage.setItem('cal-proxy-url', url);         } catch(e) {} }
 
 function _parseICSDate(val) {
   var clean = val.replace(/Z$/, '').split('T')[0];  // YYYYMMDD
@@ -61,7 +63,9 @@ function _parseICS(text) {
 async function _fetchICS(url) {
   if (!url) return [];
   try {
-    var resp = await fetch(url);
+    var proxy = _getProxyUrl();
+    var fetchUrl = proxy ? proxy + '?url=' + encodeURIComponent(url) : url;
+    var resp = await fetch(fetchUrl);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var text = await resp.text();
     return _parseICS(text);
@@ -468,7 +472,8 @@ async function _saveDates(type, id, startStr, endStr) {
 
 // ─── ICS Settings modal ───────────────────────────────────────
 function calICSSettings() {
-  var current = _getICSUrl();
+  var current      = _getICSUrl();
+  var currentProxy = _getProxyUrl();
   var modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
   modal.innerHTML =
@@ -485,6 +490,14 @@ function calICSSettings() {
         'value="' + escapeHtml(current) + '" ' +
         'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
           'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-top:4px">CORS Proxy URL</div>' +
+      '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">' +
+        'Required to load Outlook ICS links. Enter your Cloudflare Worker URL (e.g. https://ics-proxy.yourname.workers.dev).' +
+      '</div>' +
+      '<input id="cal-proxy-input" type="text" placeholder="https://ics-proxy.yourname.workers.dev" ' +
+        'value="' + escapeHtml(currentProxy) + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         (current ? '<button class="btn btn-sm btn-danger" id="cal-ics-clear">Remove</button>' : '') +
         '<button class="btn btn-sm" id="cal-ics-cancel">Cancel</button>' +
@@ -496,12 +509,15 @@ function calICSSettings() {
   document.getElementById('cal-ics-cancel').onclick = function() { document.body.removeChild(modal); };
   if (current) document.getElementById('cal-ics-clear').onclick = function() {
     _setICSUrl('');
+    _setProxyUrl('');
     document.body.removeChild(modal);
     calRefresh();
   };
   document.getElementById('cal-ics-save').onclick = async function() {
-    var url = document.getElementById('cal-ics-input').value.trim();
+    var url   = document.getElementById('cal-ics-input').value.trim();
+    var proxy = document.getElementById('cal-proxy-input').value.trim();
     _setICSUrl(url);
+    _setProxyUrl(proxy);
     document.body.removeChild(modal);
     calRefresh();
   };
