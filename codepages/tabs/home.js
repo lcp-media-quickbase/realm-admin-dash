@@ -264,72 +264,79 @@ function _render() {
         }).join('')
       : '') +
 
-    // Realm Activity
+    // Realm Activity — Kanban columns by action type
     sectionHeader('Recent Realm Activity') +
     (_realmLogs.length === 0
       ? '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No realm log entries found</div></div>'
-      : '<div style="display:flex;flex-direction:column;gap:3px">' +
-        _realmLogs.map(function(log) {
-          // Action badge color
-          var action = log.action.toLowerCase();
-          var badgeCls = /permission|access/i.test(action) ? 'badge-warning' :
-                         /add|creat/i.test(action)         ? 'badge-success' :
-                         /remov|delet/i.test(action)       ? 'badge-danger'  :
-                         /app/i.test(action)               ? 'badge-info'    : 'badge-neutral';
+      : (function() {
+          // Group logs by action type, preserving DESC order within each group
+          var groups  = {};
+          var colOrder = [];
+          _realmLogs.forEach(function(log) {
+            var key = log.action || 'Other';
+            if (!groups[key]) { groups[key] = []; colOrder.push(key); }
+            groups[key].push(log);
+          });
 
-          // Who/what was affected
-          var user = [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
-                  || log.accessUserName || log.lastModifiedBy || '';
-          var app  = log.appName || '';
+          function _colColor(action) {
+            var a = action.toLowerCase();
+            return /permission|access/i.test(a) ? '#e8a860' :
+                   /add|creat/i.test(a)         ? '#82c96a' :
+                   /remov|delet/i.test(a)       ? '#e86060' :
+                   /app|setting/i.test(a)       ? '#68B6E5' : '#9b59b6';
+          }
 
-          // Format date
-          var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
-          var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
-            ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
+          var cols = colOrder.map(function(action) {
+            var logs  = groups[action];
+            var color = _colColor(action);
 
-          return '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;' +
-            'background:var(--surface);border:1px solid var(--border);border-radius:6px;' +
-            'border-left:3px solid var(--accent)">' +
+            var cards = logs.map(function(log) {
+              var user = [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
+                      || log.accessUserName || '';
+              var app  = log.appName || '';
+              var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
+              var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
+                ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
+              var modBy = log.lastModifiedBy && log.lastModifiedBy !== user ? log.lastModifiedBy : '';
 
-            // Timestamp
-            '<div style="flex-shrink:0;text-align:right;min-width:70px">' +
-              '<div style="font-size:11px;color:var(--text-muted)">' + escapeHtml(dateStr) + '</div>' +
-              (timeStr ? '<div style="font-size:10px;color:var(--text-dim)">' + escapeHtml(timeStr) + '</div>' : '') +
-            '</div>' +
+              return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
+                'padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + color + '">' +
+                '<div style="font-size:10px;color:var(--text-dim);margin-bottom:5px">' +
+                  escapeHtml(dateStr) + (timeStr ? ' · ' + escapeHtml(timeStr) : '') +
+                '</div>' +
+                (log.details
+                  ? '<div style="font-size:12px;color:var(--text);line-height:1.4;margin-bottom:4px">' + escapeHtml(log.details) + '</div>'
+                  : '') +
+                (app
+                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">App:</span> ' + escapeHtml(app) + '</div>'
+                  : '') +
+                (user
+                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">User:</span> ' + escapeHtml(user) + '</div>'
+                  : '') +
+                (log.accessPermission
+                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">Perm:</span> ' + escapeHtml(log.accessPermission) + '</div>'
+                  : '') +
+                (modBy
+                  ? '<div style="font-size:10px;color:var(--text-dim);margin-top:3px">by ' + escapeHtml(modBy) + '</div>'
+                  : '') +
+              '</div>';
+            }).join('');
 
-            // Action badge
-            '<div style="flex-shrink:0;padding-top:1px">' +
-              '<span class="badge ' + badgeCls + '" style="font-size:10px;white-space:nowrap">' +
-                escapeHtml(log.action || '—') +
-              '</span>' +
-            '</div>' +
+            return '<div style="min-width:220px;flex:1;background:var(--surface);border:1px solid var(--border);' +
+              'border-radius:8px;overflow:hidden;display:flex;flex-direction:column">' +
+              '<div style="padding:8px 12px;background:' + color + '1a;border-bottom:2px solid ' + color + ';' +
+                'display:flex;align-items:center;gap:8px;flex-shrink:0">' +
+                '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
+                '<span style="font-size:12px;font-weight:600;color:var(--text)">' + escapeHtml(action) + '</span>' +
+                '<span style="font-size:10px;color:var(--text-dim);margin-left:auto;background:var(--border);' +
+                  'padding:1px 6px;border-radius:10px">' + logs.length + '</span>' +
+              '</div>' +
+              '<div style="padding:8px;overflow-y:auto;max-height:380px">' + cards + '</div>' +
+            '</div>';
+          }).join('');
 
-            // Main content
-            '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">' +
-              (log.details
-                ? '<div style="font-size:12px;color:var(--text);line-height:1.4">' + escapeHtml(log.details) + '</div>'
-                : '') +
-              (app
-                ? '<div style="font-size:11px;color:var(--accent)">App: ' + escapeHtml(app) + '</div>'
-                : '') +
-              (user
-                ? '<div style="font-size:11px;color:var(--text-muted)">User: ' + escapeHtml(user) + '</div>'
-                : '') +
-              (log.accessPermission
-                ? '<div style="font-size:11px;color:var(--text-dim)">Permission: ' + escapeHtml(log.accessPermission) + '</div>'
-                : '') +
-            '</div>' +
-
-            // Modified by
-            (log.lastModifiedBy
-              ? '<div style="flex-shrink:0;font-size:10px;color:var(--text-dim);text-align:right">' +
-                  escapeHtml(log.lastModifiedBy) +
-                '</div>'
-              : '') +
-
-          '</div>';
-        }).join('') +
-        '</div>'
+          return '<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:flex-start">' + cols + '</div>';
+        })()
     ) +
 
     '</div>'; // end page-body
