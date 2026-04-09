@@ -297,15 +297,19 @@ function _render() {
             '</div>' +
 
             // Main content
-            '<div style="flex:1;min-width:0">' +
+            '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">' +
               (log.details
-                ? '<div style="font-size:12px;color:var(--text)">' + escapeHtml(log.details) + '</div>'
+                ? '<div style="font-size:12px;color:var(--text);line-height:1.4">' + escapeHtml(log.details) + '</div>'
                 : '') +
-              '<div style="display:flex;gap:10px;margin-top:3px;flex-wrap:wrap">' +
-                (app  ? '<span style="font-size:11px;color:var(--accent)">App: ' + escapeHtml(app) + '</span>'  : '') +
-                (user ? '<span style="font-size:11px;color:var(--text-muted)">User: ' + escapeHtml(user) + '</span>' : '') +
-                (log.accessPermission ? '<span style="font-size:11px;color:var(--text-dim)">Permission: ' + escapeHtml(log.accessPermission) + '</span>' : '') +
-              '</div>' +
+              (app
+                ? '<div style="font-size:11px;color:var(--accent)">App: ' + escapeHtml(app) + '</div>'
+                : '') +
+              (user
+                ? '<div style="font-size:11px;color:var(--text-muted)">User: ' + escapeHtml(user) + '</div>'
+                : '') +
+              (log.accessPermission
+                ? '<div style="font-size:11px;color:var(--text-dim)">Permission: ' + escapeHtml(log.accessPermission) + '</div>'
+                : '') +
             '</div>' +
 
             // Modified by

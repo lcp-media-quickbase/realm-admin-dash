@@ -146,21 +146,21 @@ function _eventsForDate(ds) {
   _projects.forEach(function(p) {
     if (!p.estStartDate || !p.estEndDate) return;
     var s = p.estStartDate.split('T')[0], e = p.estEndDate.split('T')[0];
-    if (ds >= s && ds <= e) evs.push({ label: p.name, color: _projectColor(p.id), type: 'project' });
+    if (ds >= s && ds <= e) evs.push({ label: p.name, color: _projectColor(p.id), type: 'project', id: p.id });
   });
   _tasks.forEach(function(t) {
     if (!t.startDate || !t.estEndDate) return;
     var s = t.startDate.split('T')[0], e = t.estEndDate.split('T')[0];
-    if (ds >= s && ds <= e) evs.push({ label: t.name, color: COLOR.task, type: 'task' });
+    if (ds >= s && ds <= e) evs.push({ label: t.name, color: COLOR.task, type: 'task', id: t.id });
   });
   _releases.forEach(function(r) {
     if (!r.startDate || !r.estEndDate) return;
     var s = r.startDate.split('T')[0], e = r.estEndDate.split('T')[0];
-    if (ds >= s && ds <= e) evs.push({ label: r.name, color: COLOR.release, type: 'release' });
+    if (ds >= s && ds <= e) evs.push({ label: r.name, color: COLOR.release, type: 'release', id: r.id });
   });
   _icsEvents.forEach(function(ev) {
     var s = ev.start, e = ev.end || ev.start;
-    if (ds >= s && ds <= e) evs.push({ label: ev.name, color: COLOR.ics, type: 'ics' });
+    if (ds >= s && ds <= e) evs.push({ label: ev.name, color: COLOR.ics, type: 'ics', id: null });
   });
   return evs;
 }
@@ -310,10 +310,16 @@ function _render() {
         '<div style="font-size:12px;font-weight:' + (isToday ? '700':'500') + ';' +
           'color:' + (isToday ? 'var(--accent)':'var(--text)') + ';margin-bottom:3px">' + date.getDate() + '</div>' +
         evs.map(function(ev) {
-          return '<div style="font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;' +
+          var clickable = ev.type !== 'ics' && ev.id;
+          return '<div ' +
+            (clickable ? 'onclick="calOpenEdit(\'' + ev.type + '\',' + ev.id + ')" ' : '') +
+            'style="font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;' +
             'background:' + ev.color + '28;border-left:2px solid ' + ev.color + ';' +
-            'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4" ' +
-            'title="' + escapeHtml(ev.label) + '">' + escapeHtml(ev.label) + '</div>';
+            'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;' +
+            (clickable ? 'cursor:pointer;' : '') + '" ' +
+            'title="' + escapeHtml(ev.label) + (clickable ? ' (click to edit)' : '') + '">' +
+            escapeHtml(ev.label) +
+          '</div>';
         }).join('') +
       '</div>';
     }).join('') + '</div>' +  // end grid
@@ -539,6 +545,130 @@ async function calRefresh() {
   _render();
 }
 
+// ─── Edit modal ───────────────────────────────────────────────
+function calOpenEdit(type, id) {
+  var item = type === 'task'    ? _tasks.find(function(x)    { return x.id === id; })
+           : type === 'project' ? _projects.find(function(x) { return x.id === id; })
+           : type === 'release' ? _releases.find(function(x) { return x.id === id; })
+           : null;
+  if (!item) return;
+
+  var isTask    = type === 'task';
+  var isRelease = type === 'release';
+  var title     = isTask ? 'Edit Task' : isRelease ? 'Edit Release' : 'Edit Project';
+  var color     = isTask ? COLOR.task : isRelease ? COLOR.release : _projectColor(item.id);
+
+  // Build field rows depending on type
+  function row(label, id, value, inputType) {
+    inputType = inputType || 'text';
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + label + '</label>' +
+      '<input id="cal-edit-' + id + '" type="' + inputType + '" value="' + escapeHtml(value || '') + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+    '</div>';
+  }
+
+  function selectRow(label, id, value, options) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + label + '</label>' +
+      '<select id="cal-edit-' + id + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        options.map(function(o) {
+          return '<option value="' + escapeHtml(o) + '"' + (o === value ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>';
+  }
+
+  var statusOptions  = isTask
+    ? ['Open','In Progress','Blocked','Complete','On Hold']
+    : ['Active','In Progress','On Hold','Complete','Cancelled'];
+  var priorityOptions = ['01-Critical','02-High','03-Medium','04-Low'];
+
+  var fields = isTask
+    ? row('Name', 'name', item.name) +
+      selectRow('Status',   'status',   item.status,   statusOptions) +
+      selectRow('Priority', 'priority', item.priority, priorityOptions) +
+      row('Assigned To',  'assignedTo', item.assignedTo) +
+      row('Start Date',   'startDate',  (item.startDate  || '').split('T')[0], 'date') +
+      row('Est End Date', 'estEndDate', (item.estEndDate || '').split('T')[0], 'date')
+    : isRelease
+    ? row('Release Name', 'name',       item.name) +
+      row('Start Date',   'startDate',  (item.startDate  || '').split('T')[0], 'date') +
+      row('Est End Date', 'estEndDate', (item.estEndDate || '').split('T')[0], 'date')
+    : row('Name', 'name', item.name) +
+      selectRow('Status',   'status',   item.status,   statusOptions) +
+      selectRow('Priority', 'priority', item.priority, priorityOptions) +
+      row('Est Start Date', 'estStartDate', (item.estStartDate || '').split('T')[0], 'date') +
+      row('Est End Date',   'estEndDate',   (item.estEndDate   || '').split('T')[0], 'date');
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid ' + color + ';' +
+      'border-radius:10px;padding:24px;width:400px;display:flex;flex-direction:column;gap:14px;max-height:90vh;overflow-y:auto">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">' + title + '</div>' +
+      fields +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px">' +
+        '<button class="btn btn-sm" id="cal-edit-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="cal-edit-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  document.getElementById('cal-edit-cancel').onclick = function() { document.body.removeChild(modal); };
+
+  document.getElementById('cal-edit-save').onclick = async function() {
+    function fval(fieldId) { var el = document.getElementById('cal-edit-' + fieldId); return el ? el.value.trim() : ''; }
+
+    try {
+      if (isTask) {
+        var rec = {
+          3:                        { value: id },
+          [FIELD.TASKS.name]:       { value: fval('name') },
+          [FIELD.TASKS.status]:     { value: fval('status') },
+          [FIELD.TASKS.priority]:   { value: fval('priority') },
+          [FIELD.TASKS.assignedTo]: { value: fval('assignedTo') },
+        };
+        if (fval('startDate'))  rec[FIELD.TASKS.startDate]  = { value: fval('startDate') };
+        if (fval('estEndDate')) rec[FIELD.TASKS.estEndDate]  = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.tasks, [rec], [3]);
+        // Update local state
+        Object.assign(item, { name: fval('name'), status: fval('status'), priority: fval('priority'),
+          assignedTo: fval('assignedTo'), startDate: fval('startDate'), estEndDate: fval('estEndDate') });
+      } else if (isRelease) {
+        var rec = {
+          3:                           { value: id },
+          [FIELD.RELEASES.releaseName]: { value: fval('name') },
+        };
+        if (fval('startDate'))  rec[FIELD.RELEASES.startDate]  = { value: fval('startDate') };
+        if (fval('estEndDate')) rec[FIELD.RELEASES.estEndDate]  = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.releases, [rec], [3]);
+        Object.assign(item, { name: fval('name'), startDate: fval('startDate'), estEndDate: fval('estEndDate') });
+      } else {
+        var rec = {
+          3:                             { value: id },
+          [FIELD.PROJECTS.name]:         { value: fval('name') },
+          [FIELD.PROJECTS.status]:       { value: fval('status') },
+          [FIELD.PROJECTS.priority]:     { value: fval('priority') },
+        };
+        if (fval('estStartDate')) rec[FIELD.PROJECTS.estStartDate] = { value: fval('estStartDate') };
+        if (fval('estEndDate'))   rec[FIELD.PROJECTS.estEndDate]   = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.projects, [rec], [3]);
+        Object.assign(item, { name: fval('name'), status: fval('status'), priority: fval('priority'),
+          estStartDate: fval('estStartDate'), estEndDate: fval('estEndDate') });
+      }
+      document.body.removeChild(modal);
+      showToast('Saved', 'success');
+      _render();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    }
+  };
+}
+
 // ─── Window exports ───────────────────────────────────────────
 window.calPrevMonth   = calPrevMonth;
 window.calNextMonth   = calNextMonth;
@@ -546,5 +676,6 @@ window.calRefresh     = calRefresh;
 window.calICSSettings = calICSSettings;
 window.calDragStart   = calDragStart;
 window.calDrop        = calDrop;
+window.calOpenEdit    = calOpenEdit;
 
 })();
