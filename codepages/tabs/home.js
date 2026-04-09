@@ -48,18 +48,18 @@ function _itemsForDate(ds) {
 
   _tasks.forEach(function(t) {
     var s = _toDateStr(t.startDate), e = _toDateStr(t.estEndDate);
-    if (s && e && ds >= s && ds <= e) items.push({ type:'task', label: t.name, priority: t.priority, assignedTo: t.assignedTo, color:'#68B6E5' });
-    else if (!s && e === ds)           items.push({ type:'task', label: t.name, priority: t.priority, assignedTo: t.assignedTo, color:'#68B6E5', badge:'due' });
+    if (s && e && ds >= s && ds <= e) items.push({ type:'task', id:t.id, item:t, label: t.name, priority: t.priority, assignedTo: t.assignedTo, color:'#68B6E5' });
+    else if (!s && e === ds)           items.push({ type:'task', id:t.id, item:t, label: t.name, priority: t.priority, assignedTo: t.assignedTo, color:'#68B6E5', badge:'due' });
   });
 
   _projects.forEach(function(p) {
     var s = _toDateStr(p.estStartDate), e = _toDateStr(p.estEndDate);
-    if (s && e && ds >= s && ds <= e) items.push({ type:'project', label: p.name, color:'#82c96a' });
+    if (s && e && ds >= s && ds <= e) items.push({ type:'project', id:p.id, item:p, label: p.name, color:'#82c96a' });
   });
 
   _releases.forEach(function(r) {
     var s = _toDateStr(r.startDate), e = _toDateStr(r.estEndDate);
-    if (s && e && ds >= s && ds <= e) items.push({ type:'release', label: r.name, color:'#e8a860' });
+    if (s && e && ds >= s && ds <= e) items.push({ type:'release', id:r.id, item:r, label: r.name, color:'#e8a860' });
   });
 
   _icsEvs.forEach(function(ev) {
@@ -184,9 +184,12 @@ function _render() {
   }
 
   function itemRow(item) {
+    var clickable = item.type !== 'ics' && item.id;
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;' +
       'background:var(--surface);border:1px solid var(--border);border-radius:6px;' +
-      'border-left:3px solid ' + item.color + ';margin-bottom:4px">' +
+      'border-left:3px solid ' + item.color + ';margin-bottom:4px;' +
+      (clickable ? 'cursor:pointer;' : '') + '" ' +
+      (clickable ? 'onclick="homeOpenEdit(\'' + item.type + '\',' + item.id + ')"' : '') + '>' +
       '<div style="flex:1;font-size:13px;color:var(--text)">' + escapeHtml(item.label) + '</div>' +
       (item.priority ? _priorityBadge(item.priority) : '') +
       (item.assignedTo ? '<div style="font-size:11px;color:var(--text-dim)">' + escapeHtml(item.assignedTo) + '</div>' : '') +
@@ -211,10 +214,15 @@ function _render() {
         (items.length === 0
           ? '<div style="font-size:11px;color:var(--text-dim);text-align:center;padding:12px 4px">—</div>'
           : items.map(function(it) {
-              return '<div style="font-size:10px;padding:3px 5px;border-radius:3px;margin-bottom:2px;' +
+              var clickable = it.type !== 'ics' && it.id;
+              return '<div ' +
+                (clickable ? 'onclick="homeOpenEdit(\'' + it.type + '\',' + it.id + ')" ' : '') +
+                'style="font-size:10px;padding:3px 5px;border-radius:3px;margin-bottom:2px;' +
                 'background:' + it.color + '22;border-left:2px solid ' + it.color + ';' +
-                'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" ' +
-                'title="' + escapeHtml(it.label) + '">' + escapeHtml(it.label) + '</div>';
+                'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
+                (clickable ? 'cursor:pointer;' : '') + '" ' +
+                'title="' + escapeHtml(it.label) + (clickable ? ' (click to edit)' : '') + '">' +
+                escapeHtml(it.label) + '</div>';
             }).join('')
         ) +
       '</div>' +
@@ -335,6 +343,16 @@ async function homeRefresh() {
   _render();
 }
 
-window.homeRefresh = homeRefresh;
+function homeOpenEdit(type, id) {
+  var item = type === 'task'    ? _tasks.find(function(x)    { return x.id === id; })
+           : type === 'project' ? _projects.find(function(x) { return x.id === id; })
+           : type === 'release' ? _releases.find(function(x) { return x.id === id; })
+           : null;
+  if (!item) return;
+  window._openEditModal(type, item, _render);
+}
+
+window.homeRefresh   = homeRefresh;
+window.homeOpenEdit  = homeOpenEdit;
 
 })();

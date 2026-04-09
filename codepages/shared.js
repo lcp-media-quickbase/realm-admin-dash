@@ -355,6 +355,128 @@ var _toastStyle = document.createElement('style');
 _toastStyle.textContent = '@keyframes toastIn { from { transform:translateY(10px);opacity:0 } to { transform:translateY(0);opacity:1 } }';
 document.head.appendChild(_toastStyle);
 
+// ─── SHARED EDIT MODAL ───────────────────────────────────────
+// Opens an edit form for a task, project, or release.
+// item     — the local data object (will be mutated on save)
+// onAfterSave — callback to re-render the calling tab
+var _EDIT_PALETTE = ['#82c96a','#e8a860','#e86060','#60d4c8','#e860a8','#e8d060','#6a9be8'];
+window._openEditModal = function(type, item, onAfterSave) {
+  var isTask    = type === 'task';
+  var isRelease = type === 'release';
+  var title     = isTask ? 'Edit Task' : isRelease ? 'Edit Release' : 'Edit Project';
+  var color     = isTask    ? '#68B6E5'
+                : isRelease ? '#e8a860'
+                : _EDIT_PALETTE[item.id % _EDIT_PALETTE.length];
+
+  function row(lbl, fid, value, inputType) {
+    inputType = inputType || 'text';
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<input id="iem-' + fid + '" type="' + inputType + '" value="' + escapeHtml(value || '') + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+    '</div>';
+  }
+
+  function selectRow(lbl, fid, value, options) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<select id="iem-' + fid + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        options.map(function(o) {
+          return '<option value="' + escapeHtml(o) + '"' + (o === value ? ' selected' : '') + '>' + escapeHtml(o) + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>';
+  }
+
+  var statusOptions   = isTask ? ['Open','In Progress','Blocked','Complete','On Hold']
+                               : ['Active','In Progress','On Hold','Complete','Cancelled'];
+  var priorityOptions = ['01-Critical','02-High','03-Medium','04-Low'];
+
+  var fields = isTask
+    ? row('Name',           'name',         item.name) +
+      selectRow('Status',   'status',       item.status,   statusOptions) +
+      selectRow('Priority', 'priority',     item.priority, priorityOptions) +
+      row('Assigned To',    'assignedTo',   item.assignedTo) +
+      row('Start Date',     'startDate',   (item.startDate   || '').split('T')[0], 'date') +
+      row('Est End Date',   'estEndDate',  (item.estEndDate  || '').split('T')[0], 'date')
+    : isRelease
+    ? row('Release Name',   'name',         item.name) +
+      row('Start Date',     'startDate',   (item.startDate   || '').split('T')[0], 'date') +
+      row('Est End Date',   'estEndDate',  (item.estEndDate  || '').split('T')[0], 'date')
+    : row('Name',             'name',         item.name) +
+      selectRow('Status',     'status',       item.status,   statusOptions) +
+      selectRow('Priority',   'priority',     item.priority, priorityOptions) +
+      row('Est Start Date',   'estStartDate', (item.estStartDate || '').split('T')[0], 'date') +
+      row('Est End Date',     'estEndDate',   (item.estEndDate   || '').split('T')[0], 'date');
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid ' + color + ';' +
+      'border-radius:10px;padding:24px;width:400px;display:flex;flex-direction:column;gap:14px;max-height:90vh;overflow-y:auto">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">' + title + '</div>' +
+      fields +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px">' +
+        '<button class="btn btn-sm" id="iem-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="iem-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  document.getElementById('iem-cancel').onclick = function() { document.body.removeChild(modal); };
+
+  document.getElementById('iem-save').onclick = async function() {
+    function fval(fid) { var el = document.getElementById('iem-' + fid); return el ? el.value.trim() : ''; }
+    try {
+      var updated = {};
+      if (isTask) {
+        var rec = {
+          3:                        { value: item.id },
+          [FIELD.TASKS.name]:       { value: fval('name') },
+          [FIELD.TASKS.status]:     { value: fval('status') },
+          [FIELD.TASKS.priority]:   { value: fval('priority') },
+          [FIELD.TASKS.assignedTo]: { value: fval('assignedTo') },
+        };
+        if (fval('startDate'))  rec[FIELD.TASKS.startDate]  = { value: fval('startDate') };
+        if (fval('estEndDate')) rec[FIELD.TASKS.estEndDate]  = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.tasks, [rec], [3]);
+        updated = { name: fval('name'), status: fval('status'), priority: fval('priority'),
+          assignedTo: fval('assignedTo'), startDate: fval('startDate'), estEndDate: fval('estEndDate') };
+      } else if (isRelease) {
+        var rec = {
+          3:                            { value: item.id },
+          [FIELD.RELEASES.releaseName]: { value: fval('name') },
+        };
+        if (fval('startDate'))  rec[FIELD.RELEASES.startDate]  = { value: fval('startDate') };
+        if (fval('estEndDate')) rec[FIELD.RELEASES.estEndDate]  = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.releases, [rec], [3]);
+        updated = { name: fval('name'), startDate: fval('startDate'), estEndDate: fval('estEndDate') };
+      } else {
+        var rec = {
+          3:                             { value: item.id },
+          [FIELD.PROJECTS.name]:         { value: fval('name') },
+          [FIELD.PROJECTS.status]:       { value: fval('status') },
+          [FIELD.PROJECTS.priority]:     { value: fval('priority') },
+        };
+        if (fval('estStartDate')) rec[FIELD.PROJECTS.estStartDate] = { value: fval('estStartDate') };
+        if (fval('estEndDate'))   rec[FIELD.PROJECTS.estEndDate]   = { value: fval('estEndDate') };
+        await qbUpsert(TABLES.projects, [rec], [3]);
+        updated = { name: fval('name'), status: fval('status'), priority: fval('priority'),
+          estStartDate: fval('estStartDate'), estEndDate: fval('estEndDate') };
+      }
+      Object.assign(item, updated);
+      document.body.removeChild(modal);
+      showToast('Saved', 'success');
+      if (typeof onAfterSave === 'function') onAfterSave();
+    } catch(e) {
+      showToast('Save failed: ' + e.message, 'error');
+    }
+  };
+};
+
 // ─── TICKET SYSTEM ───────────────────────────────────────────
 // Shared LCP cross-app infrastructure — table IDs should not change.
 var TICKET_APP   = 'btnit6q26';
