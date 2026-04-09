@@ -299,8 +299,11 @@ function _render() {
                 ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
               var modBy = log.lastModifiedBy && log.lastModifiedBy !== user ? log.lastModifiedBy : '';
 
-              return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
-                'padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + color + '">' +
+              return '<div onclick="homeOpenRealmLog(' + log.id + ')" ' +
+                'style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
+                'padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + color + ';cursor:pointer" ' +
+                'onmouseenter="this.style.borderColor=\'' + color + '\';this.style.background=\'var(--surface)\'" ' +
+                'onmouseleave="this.style.borderColor=\'var(--border)\';this.style.background=\'var(--bg)\'">' +
                 '<div style="font-size:10px;color:var(--text-dim);margin-bottom:5px">' +
                   escapeHtml(dateStr) + (timeStr ? ' · ' + escapeHtml(timeStr) : '') +
                 '</div>' +
@@ -359,7 +362,61 @@ function homeOpenEdit(type, id) {
   window._openEditModal(type, item, _render);
 }
 
-window.homeRefresh   = homeRefresh;
-window.homeOpenEdit  = homeOpenEdit;
+function homeOpenRealmLog(id) {
+  var log = _realmLogs.find(function(l) { return l.id === id; });
+  if (!log) return;
+
+  function _colColor(action) {
+    var a = (action || '').toLowerCase();
+    return /permission|access/i.test(a) ? '#e8a860' :
+           /add|creat/i.test(a)         ? '#82c96a' :
+           /remov|delet/i.test(a)       ? '#e86060' :
+           /app|setting/i.test(a)       ? '#68B6E5' : '#9b59b6';
+  }
+
+  var color   = _colColor(log.action);
+  var user    = [log.userFirstName, log.userLastName].filter(Boolean).join(' ') || log.accessUserName || '';
+  var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
+  var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
+    ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
+
+  function field(label, value) {
+    if (!value) return '';
+    return '<div style="display:flex;flex-direction:column;gap:2px;padding:10px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">' + label + '</div>' +
+      '<div style="font-size:13px;color:var(--text);line-height:1.5">' + escapeHtml(value) + '</div>' +
+    '</div>';
+  }
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid ' + color + ';' +
+      'border-radius:10px;padding:24px;width:440px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
+          '<span style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(log.action || 'Realm Log') + '</span>' +
+        '</div>' +
+        '<span style="font-size:11px;color:var(--text-dim)">' + escapeHtml(dateStr) + (timeStr ? ' · ' + escapeHtml(timeStr) : '') + '</span>' +
+      '</div>' +
+      field('Details',         log.details) +
+      field('App',             log.appName) +
+      field('User',            user) +
+      field('Access Permission', log.accessPermission) +
+      field('Modified By',    log.lastModifiedBy) +
+      '<div style="padding-top:14px;display:flex;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="rlm-close">Close</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+  document.getElementById('rlm-close').onclick = function() { document.body.removeChild(modal); };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+window.homeRefresh      = homeRefresh;
+window.homeOpenEdit     = homeOpenEdit;
+window.homeOpenRealmLog = homeOpenRealmLog;
 
 })();
