@@ -384,7 +384,7 @@ function homeOpenRealmLog(id) {
     if (!value) return '';
     return '<div style="display:flex;flex-direction:column;gap:2px;padding:10px 0;border-bottom:1px solid var(--border)">' +
       '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">' + label + '</div>' +
-      '<div style="font-size:13px;color:var(--text);line-height:1.5">' + escapeHtml(value) + '</div>' +
+      '<div style="font-size:13px;color:var(--text);line-height:1.5;white-space:pre-wrap">' + escapeHtml(value) + '</div>' +
     '</div>';
   }
 
