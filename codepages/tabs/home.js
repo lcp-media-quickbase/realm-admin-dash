@@ -1,10 +1,11 @@
 (function() {
 
 // ─── State ────────────────────────────────────────────────────
-var _tasks    = [];
-var _projects = [];
-var _releases = [];
-var _icsEvs   = [];
+var _tasks     = [];
+var _projects  = [];
+var _releases  = [];
+var _realmLogs = [];
+var _icsEvs    = [];
 
 // ─── Helpers ──────────────────────────────────────────────────
 function _toDateStr(d) {
@@ -91,23 +92,41 @@ registerTab('home', {
 async function _loadAll() {
   var icsUrl = (window._icsUtils && window._icsUtils.getICSUrl) ? window._icsUtils.getICSUrl() : '';
 
+  var RL = FIELD.REALM_LOGS;
   var results = await Promise.all([
     qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
     qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases, [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
+    qbQuery(TABLES.realmLogs,   [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
   ]);
 
   _releases = results[2].map(function(r) {
     return {
-      id:        val(r, 3),
-      name:      val(r, FIELD.RELEASES.releaseName) || '',
-      startDate: val(r, FIELD.RELEASES.startDate)   || '',
-      estEndDate:val(r, FIELD.RELEASES.estEndDate)  || '',
+      id:         val(r, 3),
+      name:       val(r, FIELD.RELEASES.releaseName) || '',
+      startDate:  val(r, FIELD.RELEASES.startDate)   || '',
+      estEndDate: val(r, FIELD.RELEASES.estEndDate)  || '',
     };
   });
 
-  _icsEvs = results[3];
+  var RL = FIELD.REALM_LOGS;
+  _realmLogs = (results[3] || []).map(function(r) {
+    return {
+      id:             val(r, 3),
+      dateCreated:    val(r, RL.dateCreated)     || '',
+      action:         val(r, RL.action)          || '',
+      details:        val(r, RL.details)         || '',
+      lastModifiedBy: val(r, RL.lastModifiedBy)  || '',
+      appName:        val(r, RL.appName)         || '',
+      userFirstName:  val(r, RL.userFirstName)   || '',
+      userLastName:   val(r, RL.userLastName)    || '',
+      accessUserName: val(r, RL.accessUserName)  || '',
+      accessPermission: val(r, RL.accessPermission) || '',
+    };
+  });
+
+  _icsEvs = results[4];
 
   _tasks = results[0].map(function(r) {
     return {
@@ -236,6 +255,70 @@ function _render() {
           return itemRow({ label: t.name, priority: t.priority, assignedTo: t.assignedTo, color: '#e86060' });
         }).join('')
       : '') +
+
+    // Realm Activity
+    sectionHeader('Recent Realm Activity') +
+    (_realmLogs.length === 0
+      ? '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No realm log entries found</div></div>'
+      : '<div style="display:flex;flex-direction:column;gap:3px">' +
+        _realmLogs.map(function(log) {
+          // Action badge color
+          var action = log.action.toLowerCase();
+          var badgeCls = /permission|access/i.test(action) ? 'badge-warning' :
+                         /add|creat/i.test(action)         ? 'badge-success' :
+                         /remov|delet/i.test(action)       ? 'badge-danger'  :
+                         /app/i.test(action)               ? 'badge-info'    : 'badge-neutral';
+
+          // Who/what was affected
+          var user = [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
+                  || log.accessUserName || log.lastModifiedBy || '';
+          var app  = log.appName || '';
+
+          // Format date
+          var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
+          var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
+            ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
+
+          return '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 12px;' +
+            'background:var(--surface);border:1px solid var(--border);border-radius:6px;' +
+            'border-left:3px solid var(--accent)">' +
+
+            // Timestamp
+            '<div style="flex-shrink:0;text-align:right;min-width:70px">' +
+              '<div style="font-size:11px;color:var(--text-muted)">' + escapeHtml(dateStr) + '</div>' +
+              (timeStr ? '<div style="font-size:10px;color:var(--text-dim)">' + escapeHtml(timeStr) + '</div>' : '') +
+            '</div>' +
+
+            // Action badge
+            '<div style="flex-shrink:0;padding-top:1px">' +
+              '<span class="badge ' + badgeCls + '" style="font-size:10px;white-space:nowrap">' +
+                escapeHtml(log.action || '—') +
+              '</span>' +
+            '</div>' +
+
+            // Main content
+            '<div style="flex:1;min-width:0">' +
+              (log.details
+                ? '<div style="font-size:12px;color:var(--text)">' + escapeHtml(log.details) + '</div>'
+                : '') +
+              '<div style="display:flex;gap:10px;margin-top:3px;flex-wrap:wrap">' +
+                (app  ? '<span style="font-size:11px;color:var(--accent)">App: ' + escapeHtml(app) + '</span>'  : '') +
+                (user ? '<span style="font-size:11px;color:var(--text-muted)">User: ' + escapeHtml(user) + '</span>' : '') +
+                (log.accessPermission ? '<span style="font-size:11px;color:var(--text-dim)">Permission: ' + escapeHtml(log.accessPermission) + '</span>' : '') +
+              '</div>' +
+            '</div>' +
+
+            // Modified by
+            (log.lastModifiedBy
+              ? '<div style="flex-shrink:0;font-size:10px;color:var(--text-dim);text-align:right">' +
+                  escapeHtml(log.lastModifiedBy) +
+                '</div>'
+              : '') +
+
+          '</div>';
+        }).join('') +
+        '</div>'
+    ) +
 
     '</div>'; // end page-body
 }
