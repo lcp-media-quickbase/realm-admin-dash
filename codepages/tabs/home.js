@@ -151,6 +151,42 @@ async function _loadAll() {
     };
   });
 
+  _computeLogDiffs();
+}
+
+// ─── Diff Computation ─────────────────────────────────────────
+// Annotates each realm log with ._prev when a prior entry for the
+// same subject (user + app) had a different value for a tracked field.
+function _computeLogDiffs() {
+  // Logs arrive DESC; reverse to walk chronologically
+  var asc = _realmLogs.slice().reverse();
+  var lastSeen = {}; // subjectKey → { permission }
+
+  asc.forEach(function(log) {
+    var user = log.accessUserName
+            || [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
+            || '';
+    var parts = [];
+    if (user)        parts.push(user.toLowerCase());
+    if (log.appName) parts.push(log.appName.toLowerCase());
+    var key = parts.join('|||');
+    if (!key) return; // nothing to key on
+
+    var prev = lastSeen[key];
+    if (prev) {
+      log._prev = {};
+      if (prev.permission && log.accessPermission && prev.permission !== log.accessPermission) {
+        log._prev.permission = prev.permission;
+      }
+    } else {
+      log._prev = null;
+    }
+
+    // Always update lastSeen — carry forward if current entry doesn't have a value
+    lastSeen[key] = {
+      permission: log.accessPermission || (prev && prev.permission) || '',
+    };
+  });
 }
 
 // ─── Render ───────────────────────────────────────────────────
@@ -317,7 +353,12 @@ function _render() {
                   ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">User:</span> ' + escapeHtml(user) + '</div>'
                   : '') +
                 (log.accessPermission
-                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">Perm:</span> ' + escapeHtml(log.accessPermission) + '</div>'
+                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">Perm:</span> ' +
+                    (log._prev && log._prev.permission
+                      ? '<span style="color:var(--text-dim);text-decoration:line-through">' + escapeHtml(log._prev.permission) + '</span>' +
+                        ' → <span style="color:' + color + '">' + escapeHtml(log.accessPermission) + '</span>'
+                      : escapeHtml(log.accessPermission)) +
+                    '</div>'
                   : '') +
                 (modBy
                   ? '<div style="font-size:10px;color:var(--text-dim);margin-top:3px">by ' + escapeHtml(modBy) + '</div>'
@@ -403,7 +444,19 @@ function homeOpenRealmLog(id) {
       field('Details',         log.details) +
       field('App',             log.appName) +
       field('User',            user) +
-      field('Access Permission', log.accessPermission) +
+      (log.accessPermission
+        ? '<div style="display:flex;flex-direction:column;gap:2px;padding:10px 0;border-bottom:1px solid var(--border)">' +
+            '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">Access Permission</div>' +
+            (log._prev && log._prev.permission
+              ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+                  '<span style="font-size:13px;color:var(--text-dim);text-decoration:line-through">' + escapeHtml(log._prev.permission) + '</span>' +
+                  '<span style="color:var(--text-dim)">→</span>' +
+                  '<span style="font-size:13px;font-weight:600;color:' + color + '">' + escapeHtml(log.accessPermission) + '</span>' +
+                  '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 6px;border-radius:10px">changed</span>' +
+                '</div>'
+              : '<div style="font-size:13px;color:var(--text)">' + escapeHtml(log.accessPermission) + '</div>') +
+          '</div>'
+        : '') +
       field('Modified By',    log.lastModifiedBy) +
       '<div style="padding-top:14px;display:flex;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="rlm-close">Close</button>' +
