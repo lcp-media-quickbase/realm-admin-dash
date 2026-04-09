@@ -97,7 +97,7 @@ async function _loadAll() {
     qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
     qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases, [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
-    qbQuery(TABLES.realmLogs,   [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30),
+    qbQuery(TABLES.realmLogs,   [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
   ]);
 
