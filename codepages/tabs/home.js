@@ -189,6 +189,122 @@ function _computeLogDiffs() {
   });
 }
 
+// ─── Notes (localStorage) ─────────────────────────────────────
+function _getNotes() {
+  try { return JSON.parse(localStorage.getItem('realm-admin-notes') || '[]'); } catch(e) { return []; }
+}
+function _saveNotes(notes) {
+  try { localStorage.setItem('realm-admin-notes', JSON.stringify(notes)); } catch(e) {}
+}
+
+// ─── Three-Column Panel ───────────────────────────────────────
+function _renderThreeCol(today) {
+  var notes     = _getNotes();
+  var openTasks = _tasks
+    .filter(function(t) { return !/complete|done|closed/i.test(t.status); })
+    .sort(function(a, b) {
+      var order = {'01-critical':0,'02-high':1,'03-medium':2,'04-low':3};
+      var ap = order[(a.priority||'').toLowerCase()]; if (ap == null) ap = 4;
+      var bp = order[(b.priority||'').toLowerCase()]; if (bp == null) bp = 4;
+      return ap - bp;
+    });
+  var todayItems = _itemsForDate(today);
+
+  function colWrap(id, extra, header, body) {
+    return '<div id="' + id + '" style="flex:1;min-width:200px;background:var(--surface);' +
+      'border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;' +
+      'max-height:480px;' + (extra||'') + '">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;' +
+        'border-bottom:2px solid var(--border);flex-shrink:0">' + header + '</div>' +
+      '<div style="overflow-y:auto;flex:1;padding:8px;display:flex;flex-direction:column;gap:5px">' +
+        body +
+      '</div>' +
+    '</div>';
+  }
+
+  function colTitle(label) {
+    return '<span style="font-size:12px;font-weight:600;color:var(--text)">' + label + '</span>';
+  }
+  function colBtn(label, onclick) {
+    return '<button class="btn btn-sm" onclick="' + onclick + '">' + label + '</button>';
+  }
+  function empty(msg) {
+    return '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:20px 8px">' + msg + '</div>';
+  }
+
+  // ── Notes ──
+  var notesBody = notes.length === 0 ? empty('No notes yet') :
+    notes.slice().reverse().map(function(n) {
+      return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
+        'padding:8px 10px;position:relative">' +
+        '<div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">' + escapeHtml(n.created) + '</div>' +
+        '<div style="font-size:12px;color:var(--text);white-space:pre-wrap;line-height:1.5;padding-right:16px">' + escapeHtml(n.text) + '</div>' +
+        '<button onclick="homeDeleteNote(' + n.id + ')" title="Delete" ' +
+          'style="position:absolute;top:5px;right:7px;background:none;border:none;' +
+            'color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:0">×</button>' +
+      '</div>';
+    }).join('');
+
+  var notesCol = colWrap('home-notes-col', '',
+    colTitle('Notes') + colBtn('+ Note', 'homeAddNote()'),
+    notesBody);
+
+  // ── Tasks ──
+  var tasksBody = openTasks.length === 0 ? empty('No open tasks') :
+    openTasks.map(function(t) {
+      var priColor = /critical/i.test(t.priority) ? '#e86060' :
+                     /high/i.test(t.priority)     ? '#e8a860' :
+                     /medium/i.test(t.priority)   ? '#68B6E5' : 'var(--text-dim)';
+      var due = t.estEndDate ? String(t.estEndDate).split('T')[0] : '';
+      var overdue = due && due < today;
+      return '<div draggable="true" ondragstart="homeTaskDragStart(event,' + t.id + ')" ' +
+        'onclick="homeOpenEdit(\'task\',' + t.id + ')" ' +
+        'style="background:var(--bg);border:1px solid var(--border);border-left:3px solid #68B6E5;' +
+          'border-radius:6px;padding:7px 10px;cursor:pointer;display:flex;flex-direction:column;gap:3px" ' +
+        'title="Drag to Today to schedule · Click to edit">' +
+        '<div style="font-size:12px;color:var(--text);line-height:1.3">' + escapeHtml(t.name) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+          (t.priority ? '<span style="font-size:10px;color:' + priColor + '">' + escapeHtml(t.priority) + '</span>' : '') +
+          (t.assignedTo ? '<span style="font-size:10px;color:var(--text-dim)">' + escapeHtml(t.assignedTo) + '</span>' : '') +
+          (due ? '<span style="font-size:10px;color:' + (overdue ? '#e86060' : 'var(--text-dim)') + ';margin-left:auto">' +
+            (overdue ? '⚠ ' : '') + 'Due ' + due + '</span>' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+  var tasksCol = colWrap('home-tasks-col', '',
+    colTitle('My Tasks (' + openTasks.length + ')') + colBtn('+ Task', 'homeNewTask()'),
+    tasksBody);
+
+  // ── Today ──
+  var todayBody = todayItems.length === 0 ? empty('Nothing scheduled today') :
+    todayItems.map(function(it) {
+      var clickable = it.type !== 'ics' && it.id;
+      return '<div ' +
+        (clickable ? 'onclick="homeOpenEdit(\'' + it.type + '\',' + it.id + ')" ' : '') +
+        'style="background:var(--bg);border:1px solid var(--border);border-left:3px solid ' + it.color + ';' +
+          'border-radius:6px;padding:7px 10px;' + (clickable ? 'cursor:pointer;' : '') + '">' +
+        '<div style="font-size:12px;color:var(--text);line-height:1.3">' + escapeHtml(it.label) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-dim);margin-top:2px;text-transform:capitalize">' + escapeHtml(it.type) + '</div>' +
+      '</div>';
+    }).join('');
+
+  var todayCol = colWrap('home-today-col', '',
+    colTitle(_fmtDateLabel(today)),
+    '<div id="home-today-drop" ' +
+      'ondragover="event.preventDefault();document.getElementById(\'home-today-drop\').style.outline=\'2px dashed var(--accent)\'" ' +
+      'ondragleave="document.getElementById(\'home-today-drop\').style.outline=\'none\'" ' +
+      'ondrop="homeTodayDrop(event)" ' +
+      'style="display:flex;flex-direction:column;gap:5px;min-height:60px;border-radius:6px;padding:2px;transition:outline 0.1s">' +
+      todayBody +
+      '<div style="font-size:10px;color:var(--text-dim);text-align:center;padding:6px;border:1px dashed var(--border);border-radius:6px;margin-top:4px">Drop task here to schedule for today</div>' +
+    '</div>');
+
+  return '<div style="display:flex;gap:12px;align-items:flex-start">' +
+    notesCol + tasksCol + todayCol +
+  '</div>';
+}
+
 // ─── Render ───────────────────────────────────────────────────
 function _render() {
   var c = document.getElementById('tab-home');
@@ -291,6 +407,10 @@ function _render() {
     // This week
     sectionHeader('This Week') +
     '<div style="display:flex;gap:4px;overflow-x:auto">' + weekHtml + '</div>' +
+
+    // Three-column panel
+    sectionHeader('') +
+    _renderThreeCol(today) +
 
     // Overdue
     (overdue.length > 0
@@ -468,8 +588,145 @@ function homeOpenRealmLog(id) {
   modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
 }
 
-window.homeRefresh      = homeRefresh;
-window.homeOpenEdit     = homeOpenEdit;
-window.homeOpenRealmLog = homeOpenRealmLog;
+// ─── Notes Actions ────────────────────────────────────────────
+function homeAddNote() {
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Note</div>' +
+      '<textarea id="home-note-input" rows="6" placeholder="Type your note..." ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="home-note-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="home-note-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  var ta = document.getElementById('home-note-input');
+  ta.focus();
+  document.getElementById('home-note-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('home-note-save').onclick = function() {
+    var text = ta.value.trim();
+    if (!text) return;
+    var notes = _getNotes();
+    notes.push({ id: Date.now(), text: text, created: _todayStr() });
+    _saveNotes(notes);
+    document.body.removeChild(modal);
+    _render();
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+function homeDeleteNote(id) {
+  var notes = _getNotes().filter(function(n) { return n.id !== id; });
+  _saveNotes(notes);
+  _render();
+}
+
+// ─── New Task ─────────────────────────────────────────────────
+function homeNewTask() {
+  function inputRow(lbl, id, type, value, placeholder) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<input id="' + id + '" type="' + (type||'text') + '" value="' + escapeHtml(value||'') + '" ' +
+        (placeholder ? 'placeholder="' + escapeHtml(placeholder) + '" ' : '') +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+    '</div>';
+  }
+  function selectRow(lbl, id, options) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<select id="' + id + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+        'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        options.map(function(o) { return '<option>' + escapeHtml(o) + '</option>'; }).join('') +
+      '</select>' +
+    '</div>';
+  }
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #68B6E5;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Task</div>' +
+      inputRow('Name *', 'ntm-name', 'text', '', 'Task name') +
+      selectRow('Priority', 'ntm-priority', ['03-Medium','01-Critical','02-High','04-Low']) +
+      inputRow('Assigned To', 'ntm-assignedTo', 'text', '') +
+      inputRow('Start Date', 'ntm-startDate', 'date', '') +
+      inputRow('Est End Date', 'ntm-estEndDate', 'date', '') +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="ntm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="ntm-save">Create</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('ntm-name').focus();
+  document.getElementById('ntm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('ntm-save').onclick = async function() {
+    var name = document.getElementById('ntm-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+    try {
+      var rec = {};
+      rec[FIELD.TASKS.name]       = { value: name };
+      rec[FIELD.TASKS.priority]   = { value: document.getElementById('ntm-priority').value };
+      rec[FIELD.TASKS.assignedTo] = { value: document.getElementById('ntm-assignedTo').value.trim() };
+      rec[FIELD.TASKS.status]     = { value: 'Open' };
+      var sd = document.getElementById('ntm-startDate').value;
+      var ed = document.getElementById('ntm-estEndDate').value;
+      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      await qbUpsert(TABLES.tasks, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Task created', 'success');
+      await _loadAll();
+      _render();
+    } catch(e) {
+      showToast('Failed: ' + e.message, 'error');
+    }
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+// ─── Task → Today drag ────────────────────────────────────────
+function homeTaskDragStart(e, id) {
+  e.dataTransfer.setData('text/plain', String(id));
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+async function homeTodayDrop(e) {
+  e.preventDefault();
+  var dropEl = document.getElementById('home-today-drop');
+  if (dropEl) dropEl.style.outline = 'none';
+  var id = parseInt(e.dataTransfer.getData('text/plain'));
+  if (!id) return;
+  var today = _todayStr();
+  var task  = _tasks.find(function(t) { return t.id === id; });
+  if (!task) return;
+  try {
+    var rec = { 3: { value: id } };
+    rec[FIELD.TASKS.startDate]  = { value: today };
+    rec[FIELD.TASKS.estEndDate] = { value: today };
+    await qbUpsert(TABLES.tasks, [rec], [3]);
+    task.startDate  = today;
+    task.estEndDate = today;
+    showToast('Task scheduled for today', 'success');
+    _render();
+  } catch(err) {
+    showToast('Failed: ' + err.message, 'error');
+  }
+}
+
+window.homeRefresh        = homeRefresh;
+window.homeOpenEdit       = homeOpenEdit;
+window.homeOpenRealmLog   = homeOpenRealmLog;
+window.homeAddNote        = homeAddNote;
+window.homeDeleteNote     = homeDeleteNote;
+window.homeNewTask        = homeNewTask;
+window.homeTaskDragStart  = homeTaskDragStart;
+window.homeTodayDrop      = homeTodayDrop;
 
 })();
