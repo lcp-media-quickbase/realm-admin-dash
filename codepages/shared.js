@@ -566,8 +566,11 @@ async function resolveCurrentUser() {
       // QB returns the user ID as the id attribute on the <user> element
       var userIdMatch = text.match(/<user[^>]+id="([^"]+)"/);
       if (userIdMatch) _currentUser.userId = userIdMatch[1];
+      console.log('[Auth] Resolved — email:', _currentUser.email || '(unknown)', 'userId:', _currentUser.userId || '(unknown)');
+    } else {
+      console.warn('[Auth] API_GetUserInfo returned status:', resp.status);
     }
-  } catch(e) { console.warn('[Auth] Could not resolve user email:', e); }
+  } catch(e) { console.warn('[Auth] Could not resolve user:', e); }
 }
 
 function currentUser() { return _currentUser; }
