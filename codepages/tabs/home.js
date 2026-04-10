@@ -236,43 +236,54 @@ function _renderRealmOverview() {
   var cards = _apps.map(function(app) {
     var users    = _appUsers[app.id] || [];
     var expanded = _appExpanded[app.id];
+    var isPublic = app.openToInternet && app.openToInternet !== '0' && app.openToInternet !== 'false';
 
-    var chevron = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
-      'stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transform:rotate(' + (expanded ? '90' : '0') + 'deg);transition:transform 0.15s;color:var(--text-dim)">' +
-      '<polyline points="9 18 15 12 9 6"/></svg>';
+    var usersHtml =
+      '<div id="app-users-' + app.id + '" style="' + (expanded ? '' : 'display:none;') +
+        'padding:8px 10px;border-top:1px solid var(--border)">' +
+      (users.length === 0
+        ? '<div style="font-size:12px;color:var(--text-dim);padding:2px 0">No users found</div>'
+        : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:5px">' +
+          users.map(function(u) {
+            var color = permColor(u.role);
+            return '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;' +
+              'background:var(--bg);border:1px solid var(--border);border-radius:6px;min-width:0">' +
+              '<div style="width:6px;height:6px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
+              '<span style="font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
+                'title="' + escapeHtml(u.name || u.userId || '') + '">' + escapeHtml(u.name || u.userId || '—') + '</span>' +
+              '<span style="font-size:10px;color:' + color + ';white-space:nowrap;flex-shrink:0">' + escapeHtml(u.role || '—') + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>') +
+      '</div>';
 
-    var usersHtml = expanded
-      ? (users.length === 0
-          ? '<div style="padding:8px 14px;font-size:12px;color:var(--text-dim);border-top:1px solid var(--border)">No users found</div>'
-          : users.map(function(u) {
-              var color = permColor(u.role);
-              return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--border)">' +
-                '<div style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(u.name || u.userId || '—') + '</div>' +
-                '<span style="font-size:11px;font-weight:500;color:' + color + ';background:' + color + '1a;' +
-                  'padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0">' + escapeHtml(u.role || '—') + '</span>' +
-              '</div>';
-            }).join(''))
-      : '';
-
-    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px">' +
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
       '<div onclick="homeToggleApp(' + app.id + ')" ' +
-        'style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none" ' +
+        'style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none" ' +
         'onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">' +
-        chevron +
-        '<span style="font-size:13px;font-weight:600;color:var(--text);flex:1">' + escapeHtml(app.name || app.appId || '—') + '</span>' +
-        (app.openToInternet ? '<span style="font-size:10px;color:#82c96a;background:#82c96a1a;padding:2px 8px;border-radius:10px;flex-shrink:0">Public</span>' : '') +
-        '<span style="font-size:11px;color:var(--text-dim);flex-shrink:0">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>' +
+        '<svg id="app-chevron-' + app.id + '" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+          'stroke-linecap="round" stroke-linejoin="round" ' +
+          'style="flex-shrink:0;transform:rotate(' + (expanded ? '90' : '0') + 'deg);transition:transform 0.15s;color:var(--text-dim)">' +
+          '<polyline points="9 18 15 12 9 6"/>' +
+        '</svg>' +
+        '<span style="font-size:12px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
+          'title="' + escapeHtml(app.name || app.appId || '') + '">' + escapeHtml(app.name || app.appId || '—') + '</span>' +
+        (isPublic ? '<span style="font-size:10px;color:#82c96a;background:#82c96a1a;padding:1px 6px;border-radius:8px;flex-shrink:0">Public</span>' : '') +
+        '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 7px;border-radius:10px;flex-shrink:0">' + users.length + '</span>' +
       '</div>' +
       usersHtml +
     '</div>';
   }).join('');
 
-  return '<div style="display:flex;flex-direction:column">' + cards + '</div>';
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:8px">' + cards + '</div>';
 }
 
 function homeToggleApp(id) {
   _appExpanded[id] = !_appExpanded[id];
-  _render();
+  var usersEl   = document.getElementById('app-users-'   + id);
+  var chevronEl = document.getElementById('app-chevron-' + id);
+  if (usersEl)   usersEl.style.display = _appExpanded[id] ? 'block' : 'none';
+  if (chevronEl) chevronEl.style.transform = 'rotate(' + (_appExpanded[id] ? '90' : '0') + 'deg)';
 }
 
 // ─── Notes helpers ────────────────────────────────────────────
