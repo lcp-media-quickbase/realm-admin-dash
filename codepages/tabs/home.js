@@ -204,15 +204,24 @@ async function _fetchAppUsers(appDBID) {
     var resp = await fetch(url, { method: 'GET', credentials: 'include' });
     if (!resp.ok) return [];
     var text = await resp.text();
+    // Log first 800 chars so we can verify the response format
+    console.log('[QB API_UserRoles] ' + appDBID + ':', text.substring(0, 800));
     var users = [];
-    // API_UserRoles response: <user id="..."><name>...</name><roles><role name="..."/></roles></user>
     var userRe = /<user[^>]+id="([^"]+)"[^>]*>([\s\S]*?)<\/user>/g;
     var match;
     while ((match = userRe.exec(text)) !== null) {
       var userId = match[1];
       var block  = match[2];
       var name = (block.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
-      var role = (block.match(/<role[^>]+name="([^"]+)"/) || [])[1] || '';
+      // Try several common QB role attribute/element formats
+      var role = (block.match(/<role[^>]+name="([^"]+)"/)  || [])[1] ||
+                 (block.match(/<role[^>]+name='([^']+)'/)   || [])[1] ||
+                 (block.match(/<role[^>]+access="([^"]+)"/) || [])[1] ||
+                 (block.match(/<role[^>]+access='([^']+)'/) || [])[1] || '';
+      if (!role) {
+        var rolesBlock = (block.match(/<roles>([\s\S]*?)<\/roles>/) || [])[1] || '';
+        role = (rolesBlock.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
+      }
       users.push({ userId: userId, name: name, role: role });
     }
     return users;
