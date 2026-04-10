@@ -226,6 +226,29 @@ function _renderRealmOverview() {
     return '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No apps found</div></div>';
   }
 
+  var rows = _apps.map(function(app) {
+    var users    = _appUsers[app.id] || [];
+    var isPublic = app.openToInternet && app.openToInternet !== '0' && app.openToInternet !== 'false';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)">' +
+      '<span style="font-size:13px;font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
+        'title="' + escapeHtml(app.name || app.appId || '') + '">' + escapeHtml(app.name || app.appId || '—') + '</span>' +
+      (isPublic ? '<span style="font-size:10px;color:#82c96a;background:#82c96a1a;padding:1px 6px;border-radius:8px;flex-shrink:0">Public</span>' : '') +
+      '<span style="font-size:11px;color:var(--text-dim);flex-shrink:0">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>' +
+      '<button class="btn btn-sm" onclick="homeOpenAppUsers(' + app.id + ')" ' +
+        'style="font-size:11px;padding:3px 10px;flex-shrink:0">View →</button>' +
+    '</div>';
+  }).join('');
+
+  return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
+    rows.replace(/border-bottom:1px solid var\(--border\)(?=.*<\/div>\s*$)/, '') + // remove last row's border
+  '</div>';
+}
+
+function homeOpenAppUsers(id) {
+  var app   = _apps.find(function(a) { return a.id === id; });
+  var users = _appUsers[id] || [];
+  if (!app) return;
+
   function permColor(p) {
     return !p                      ? 'var(--text-dim)' :
            /admin/i.test(p)        ? '#e86060'         :
@@ -233,57 +256,82 @@ function _renderRealmOverview() {
            /basic|viewer/i.test(p) ? '#82c96a'         : '#68B6E5';
   }
 
-  var cards = _apps.map(function(app) {
-    var users    = _appUsers[app.id] || [];
-    var expanded = _appExpanded[app.id];
-    var isPublic = app.openToInternet && app.openToInternet !== '0' && app.openToInternet !== 'false';
-
-    var usersHtml =
-      '<div id="app-users-' + app.id + '" style="' + (expanded ? '' : 'display:none;') +
-        'padding:8px 10px;border-top:1px solid var(--border)">' +
-      (users.length === 0
-        ? '<div style="font-size:12px;color:var(--text-dim);padding:2px 0">No users found</div>'
-        : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:5px">' +
-          users.map(function(u) {
-            var color = permColor(u.role);
-            return '<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;' +
-              'background:var(--bg);border:1px solid var(--border);border-radius:6px;min-width:0">' +
-              '<div style="width:6px;height:6px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
-              '<span style="font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
-                'title="' + escapeHtml(u.name || u.userId || '') + '">' + escapeHtml(u.name || u.userId || '—') + '</span>' +
-              '<span style="font-size:10px;color:' + color + ';white-space:nowrap;flex-shrink:0">' + escapeHtml(u.role || '—') + '</span>' +
-            '</div>';
-          }).join('') +
-        '</div>') +
+  function renderList(q) {
+    var filtered = q
+      ? users.filter(function(u) {
+          return ((u.name || '') + ' ' + (u.role || '')).toLowerCase().indexOf(q.toLowerCase()) !== -1;
+        })
+      : users;
+    if (filtered.length === 0) {
+      return '<div style="text-align:center;padding:28px;font-size:13px;color:var(--text-dim)">No users match</div>';
+    }
+    return filtered.map(function(u) {
+      var color = permColor(u.role);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border)">' +
+        '<div style="flex:1;font-size:13px;color:var(--text)">' + escapeHtml(u.name || u.userId || '—') + '</div>' +
+        '<span style="font-size:11px;font-weight:500;color:' + color + ';background:' + color + '1a;' +
+          'padding:3px 10px;border-radius:10px;white-space:nowrap">' + escapeHtml(u.role || '—') + '</span>' +
       '</div>';
+    }).join('');
+  }
 
-    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
-      '<div onclick="homeToggleApp(' + app.id + ')" ' +
-        'style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none" ' +
-        'onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">' +
-        '<svg id="app-chevron-' + app.id + '" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
-          'stroke-linecap="round" stroke-linejoin="round" ' +
-          'style="flex-shrink:0;transform:rotate(' + (expanded ? '90' : '0') + 'deg);transition:transform 0.15s;color:var(--text-dim)">' +
-          '<polyline points="9 18 15 12 9 6"/>' +
-        '</svg>' +
-        '<span style="font-size:12px;font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
-          'title="' + escapeHtml(app.name || app.appId || '') + '">' + escapeHtml(app.name || app.appId || '—') + '</span>' +
-        (isPublic ? '<span style="font-size:10px;color:#82c96a;background:#82c96a1a;padding:1px 6px;border-radius:8px;flex-shrink:0">Public</span>' : '') +
-        '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 7px;border-radius:10px;flex-shrink:0">' + users.length + '</span>' +
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #68B6E5;' +
+      'border-radius:10px;width:500px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column">' +
+
+      // Header
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;flex-shrink:0">' +
+        '<div>' +
+          '<div style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(app.name || app.appId || '—') + '</div>' +
+          '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</div>' +
+        '</div>' +
+        '<button id="hau-x" style="background:none;border:none;font-size:22px;color:var(--text-dim);cursor:pointer;line-height:1;padding:0 2px">×</button>' +
       '</div>' +
-      usersHtml +
+
+      // Search
+      '<div style="padding:0 16px 12px;flex-shrink:0">' +
+        '<div style="position:relative">' +
+          '<svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none" ' +
+            'width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' +
+          '</svg>' +
+          '<input id="hau-search" placeholder="Search by name or role…" autocomplete="off" ' +
+            'style="width:100%;padding:7px 12px 7px 30px;background:var(--bg);color:var(--text);' +
+              'border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;' +
+              'outline:none;box-sizing:border-box" ' +
+            'onfocus="this.style.borderColor=\'var(--accent)\'" onblur="this.style.borderColor=\'var(--border)\'">' +
+        '</div>' +
+      '</div>' +
+
+      // User list
+      '<div id="hau-list" style="overflow-y:auto;flex:1;border-top:1px solid var(--border)">' +
+        renderList('') +
+      '</div>' +
+
+      // Footer
+      '<div style="padding:12px 20px;flex-shrink:0;display:flex;justify-content:flex-end;border-top:1px solid var(--border)">' +
+        '<button class="btn btn-sm" id="hau-close">Close</button>' +
+      '</div>' +
     '</div>';
-  }).join('');
 
-  return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:8px">' + cards + '</div>';
-}
+  document.body.appendChild(modal);
 
-function homeToggleApp(id) {
-  _appExpanded[id] = !_appExpanded[id];
-  var usersEl   = document.getElementById('app-users-'   + id);
-  var chevronEl = document.getElementById('app-chevron-' + id);
-  if (usersEl)   usersEl.style.display = _appExpanded[id] ? 'block' : 'none';
-  if (chevronEl) chevronEl.style.transform = 'rotate(' + (_appExpanded[id] ? '90' : '0') + 'deg)';
+  var searchEl = document.getElementById('hau-search');
+  var listEl   = document.getElementById('hau-list');
+  var timer    = null;
+
+  document.getElementById('hau-x').onclick     = function() { document.body.removeChild(modal); };
+  document.getElementById('hau-close').onclick = function() { document.body.removeChild(modal); };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+
+  searchEl.addEventListener('input', function() {
+    var q = this.value;
+    clearTimeout(timer);
+    timer = setTimeout(function() { listEl.innerHTML = renderList(q); }, 150);
+  });
+  searchEl.focus();
 }
 
 // ─── Notes helpers ────────────────────────────────────────────
@@ -298,8 +346,13 @@ function _taskName(id) {
 
 // ─── Three-Column Panel ───────────────────────────────────────
 function _renderThreeCol(today) {
+  var me = (currentUser().name || '').toLowerCase();
   var openTasks = _tasks
-    .filter(function(t) { return !/complete|done|closed/i.test(t.status); })
+    .filter(function(t) {
+      if (/complete|done|closed/i.test(t.status)) return false;
+      if (me && (!t.assignedTo || t.assignedTo.toLowerCase() !== me)) return false;
+      return true;
+    })
     .sort(function(a, b) {
       var order = {'01-critical':0,'02-high':1,'03-medium':2,'04-low':3};
       var ap = order[(a.priority||'').toLowerCase()]; if (ap == null) ap = 4;
@@ -990,7 +1043,7 @@ function _homeNewNoteForCalEvent(ev) {
 
 window.homeRefresh        = homeRefresh;
 window.homeOpenEdit       = homeOpenEdit;
-window.homeToggleApp      = homeToggleApp;
+window.homeOpenAppUsers   = homeOpenAppUsers;
 window.homeOpenCalEvent   = homeOpenCalEvent;
 window.homeAddNote        = homeAddNote;
 window.homeEditNote       = homeEditNote;
