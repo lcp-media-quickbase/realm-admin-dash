@@ -6,6 +6,7 @@ var _projects  = [];
 var _releases  = [];
 var _realmLogs = [];
 var _icsEvs    = [];
+var _notes     = [];
 
 // ─── Helpers ──────────────────────────────────────────────────
 function _toDateStr(d) {
@@ -93,12 +94,14 @@ async function _loadAll() {
   var icsUrl = (window._icsUtils && window._icsUtils.getICSUrl) ? window._icsUtils.getICSUrl() : '';
 
   var RL = FIELD.REALM_LOGS;
+  var NF = FIELD.NOTES;
   var results = await Promise.all([
     qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
     qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases, [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     qbQuery(TABLES.realmLogs,   [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
+    qbQueryAll(TABLES.notes, [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject], null, [{fieldId: 3, order: 'DESC'}]),
   ]);
 
   _releases = results[2].map(function(r) {
@@ -127,6 +130,16 @@ async function _loadAll() {
   });
 
   _icsEvs = results[4];
+
+  _notes = results[5].map(function(r) {
+    return {
+      id:             val(r, 3),
+      name:           val(r, NF.name)           || '',
+      description:    val(r, NF.description)    || '',
+      relatedTask:    val(r, NF.relatedTask)     || '',
+      relatedProject: val(r, NF.relatedProject) || '',
+    };
+  });
 
   _tasks = results[0].map(function(r) {
     return {
@@ -189,17 +202,18 @@ function _computeLogDiffs() {
   });
 }
 
-// ─── Notes (localStorage) ─────────────────────────────────────
-function _getNotes() {
-  try { return JSON.parse(localStorage.getItem('realm-admin-notes') || '[]'); } catch(e) { return []; }
+// ─── Notes helpers ────────────────────────────────────────────
+function _projectName(id) {
+  var p = _projects.find(function(p) { return p.id == id; });
+  return p ? p.name : '';
 }
-function _saveNotes(notes) {
-  try { localStorage.setItem('realm-admin-notes', JSON.stringify(notes)); } catch(e) {}
+function _taskName(id) {
+  var t = _tasks.find(function(t) { return t.id == id; });
+  return t ? t.name : '';
 }
 
 // ─── Three-Column Panel ───────────────────────────────────────
 function _renderThreeCol(today) {
-  var notes     = _getNotes();
   var openTasks = _tasks
     .filter(function(t) { return !/complete|done|closed/i.test(t.status); })
     .sort(function(a, b) {
@@ -233,12 +247,20 @@ function _renderThreeCol(today) {
   }
 
   // ── Notes ──
-  var notesBody = notes.length === 0 ? empty('No notes yet') :
-    notes.slice().reverse().map(function(n) {
+  var notesBody = _notes.length === 0 ? empty('No notes yet') :
+    _notes.map(function(n) {
+      var linkedTask    = n.relatedTask    ? _taskName(n.relatedTask)       : '';
+      var linkedProject = n.relatedProject ? _projectName(n.relatedProject) : '';
       return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
         'padding:8px 10px;position:relative">' +
-        '<div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">' + escapeHtml(n.created) + '</div>' +
-        '<div style="font-size:12px;color:var(--text);white-space:pre-wrap;line-height:1.5;padding-right:16px">' + escapeHtml(n.text) + '</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text);padding-right:18px;margin-bottom:3px">' + escapeHtml(n.name || '(Untitled)') + '</div>' +
+        (n.description ? '<div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;line-height:1.5;margin-bottom:4px">' + escapeHtml(n.description) + '</div>' : '') +
+        ((linkedTask || linkedProject)
+          ? '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            (linkedTask    ? '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 6px;border-radius:10px">Task: ' + escapeHtml(linkedTask) + '</span>' : '') +
+            (linkedProject ? '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 6px;border-radius:10px">Project: ' + escapeHtml(linkedProject) + '</span>' : '') +
+          '</div>'
+          : '') +
         '<button onclick="homeDeleteNote(' + n.id + ')" title="Delete" ' +
           'style="position:absolute;top:5px;right:7px;background:none;border:none;' +
             'color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:0">×</button>' +
@@ -590,40 +612,86 @@ function homeOpenRealmLog(id) {
 
 // ─── Notes Actions ────────────────────────────────────────────
 function homeAddNote() {
+  function inputRow(lbl, id, type) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<input id="' + id + '" type="' + (type||'text') + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+    '</div>';
+  }
+  function selectRow(lbl, id, optionsHtml) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<select id="' + id + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+        'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        optionsHtml +
+      '</select>' +
+    '</div>';
+  }
+
+  var taskOptions   = '<option value="">— None —</option>' +
+    _tasks.map(function(t) { return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>'; }).join('');
+  var projectOptions = '<option value="">— None —</option>' +
+    _projects.map(function(p) { return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>'; }).join('');
+
   var modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
   modal.innerHTML =
     '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
-      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      'border-radius:10px;padding:24px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
       '<div style="font-size:15px;font-weight:600;color:var(--text)">New Note</div>' +
-      '<textarea id="home-note-input" rows="6" placeholder="Type your note..." ' +
-        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
-          'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>' +
+      inputRow('Title *', 'nm-name') +
+      '<div style="display:flex;flex-direction:column;gap:4px">' +
+        '<label style="font-size:11px;color:var(--text-muted)">Description</label>' +
+        '<textarea id="nm-desc" rows="5" ' +
+          'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+            'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>' +
+      '</div>' +
+      selectRow('Related Task (optional)', 'nm-task', taskOptions) +
+      selectRow('Related Project (optional)', 'nm-project', projectOptions) +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-        '<button class="btn btn-sm" id="home-note-cancel">Cancel</button>' +
-        '<button class="btn btn-sm btn-primary" id="home-note-save">Save</button>' +
+        '<button class="btn btn-sm" id="nm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="nm-save">Save</button>' +
       '</div>' +
     '</div>';
   document.body.appendChild(modal);
-  var ta = document.getElementById('home-note-input');
-  ta.focus();
-  document.getElementById('home-note-cancel').onclick = function() { document.body.removeChild(modal); };
-  document.getElementById('home-note-save').onclick = function() {
-    var text = ta.value.trim();
-    if (!text) return;
-    var notes = _getNotes();
-    notes.push({ id: Date.now(), text: text, created: _todayStr() });
-    _saveNotes(notes);
-    document.body.removeChild(modal);
-    _render();
+  document.getElementById('nm-name').focus();
+  document.getElementById('nm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('nm-save').onclick = async function() {
+    var name = document.getElementById('nm-name').value.trim();
+    if (!name) { showToast('Title is required', 'error'); return; }
+    try {
+      var NF  = FIELD.NOTES;
+      var rec = {};
+      rec[NF.name]        = { value: name };
+      rec[NF.description] = { value: document.getElementById('nm-desc').value.trim() };
+      var taskId    = document.getElementById('nm-task').value;
+      var projectId = document.getElementById('nm-project').value;
+      if (taskId)    rec[NF.relatedTask]    = { value: parseInt(taskId) };
+      if (projectId) rec[NF.relatedProject] = { value: parseInt(projectId) };
+      await qbUpsert(TABLES.notes, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Note saved', 'success');
+      await _loadAll();
+      _render();
+    } catch(e) {
+      showToast('Failed: ' + e.message, 'error');
+    }
   };
   modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
 }
 
-function homeDeleteNote(id) {
-  var notes = _getNotes().filter(function(n) { return n.id !== id; });
-  _saveNotes(notes);
-  _render();
+async function homeDeleteNote(id) {
+  if (!confirm('Delete this note?')) return;
+  try {
+    await qbDelete(TABLES.notes, '{3.EX.' + id + '}');
+    showToast('Note deleted', 'success');
+    await _loadAll();
+    _render();
+  } catch(e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
 }
 
 // ─── New Task ─────────────────────────────────────────────────

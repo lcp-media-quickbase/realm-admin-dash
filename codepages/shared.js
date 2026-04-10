@@ -37,6 +37,7 @@ var TABLES = {
   tasks:     'btnit6q3m',
   realmLogs: 'bt8sr94e9',
   apps:      'bu83a2h8x',
+  notes:     'bvx6b5a7u',
 };
 
 // ─── FIELDS ──────────────────────────────────────────────────
@@ -100,6 +101,12 @@ var FIELD = {
     id:             6,
     name:           7,
     openToInternet:  8,
+  },
+  NOTES: {
+    name:           6,
+    description:    7,
+    relatedTask:    9,
+    relatedProject: 11,
   },
 };
 
