@@ -66,7 +66,12 @@ function _itemsForDate(ds) {
 
   _icsEvs.forEach(function(ev) {
     var s = ev.start, e = ev.end || ev.start;
-    if (ds >= s && ds <= e) items.push({ type:'ics', label: ev.name, color:'#9b59b6' });
+    if (ds >= s && ds <= e) {
+      var qbRec = ev.uid
+        ? _calEvs.find(function(c) { return c.uid === ev.uid; })
+        : _calEvs.find(function(c) { return c.title === ev.name && c.date === ev.start; });
+      items.push({ type:'ics', id: qbRec ? qbRec.id : null, label: ev.name, color:'#9b59b6' });
+    }
   });
 
   return items;
@@ -317,9 +322,12 @@ function _renderThreeCol(today) {
   // ── Today ──
   var todayBody = todayItems.length === 0 ? empty('Nothing scheduled today') :
     todayItems.map(function(it) {
-      var clickable = it.type !== 'ics' && it.id;
+      var clickable = it.id != null;
+      var handler   = it.type === 'ics'
+        ? 'homeOpenCalEvent(' + it.id + ')'
+        : 'homeOpenEdit(\'' + it.type + '\',' + it.id + ')';
       return '<div ' +
-        (clickable ? 'onclick="homeOpenEdit(\'' + it.type + '\',' + it.id + ')" ' : '') +
+        (clickable ? 'onclick="' + handler + '" ' : '') +
         'style="background:var(--bg);border:1px solid var(--border);border-left:3px solid ' + it.color + ';' +
           'border-radius:6px;padding:7px 10px;' + (clickable ? 'cursor:pointer;' : '') + '">' +
         '<div style="font-size:12px;color:var(--text);line-height:1.3">' + escapeHtml(it.label) + '</div>' +
@@ -374,12 +382,15 @@ function _render() {
   }
 
   function itemRow(item) {
-    var clickable = item.type !== 'ics' && item.id;
+    var clickable = item.id != null;
+    var handler   = item.type === 'ics'
+      ? 'homeOpenCalEvent(' + item.id + ')'
+      : 'homeOpenEdit(\'' + item.type + '\',' + item.id + ')';
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;' +
       'background:var(--surface);border:1px solid var(--border);border-radius:6px;' +
       'border-left:3px solid ' + item.color + ';margin-bottom:4px;' +
       (clickable ? 'cursor:pointer;' : '') + '" ' +
-      (clickable ? 'onclick="homeOpenEdit(\'' + item.type + '\',' + item.id + ')"' : '') + '>' +
+      (clickable ? 'onclick="' + handler + '"' : '') + '>' +
       '<div style="flex:1;font-size:13px;color:var(--text)">' + escapeHtml(item.label) + '</div>' +
       (item.priority ? _priorityBadge(item.priority) : '') +
       (item.assignedTo ? '<div style="font-size:11px;color:var(--text-dim)">' + escapeHtml(item.assignedTo) + '</div>' : '') +
@@ -404,14 +415,17 @@ function _render() {
         (items.length === 0
           ? '<div style="font-size:11px;color:var(--text-dim);text-align:center;padding:12px 4px">—</div>'
           : items.map(function(it) {
-              var clickable = it.type !== 'ics' && it.id;
+              var clickable = it.id != null;
+              var handler   = it.type === 'ics'
+                ? 'homeOpenCalEvent(' + it.id + ')'
+                : 'homeOpenEdit(\'' + it.type + '\',' + it.id + ')';
               return '<div ' +
-                (clickable ? 'onclick="homeOpenEdit(\'' + it.type + '\',' + it.id + ')" ' : '') +
+                (clickable ? 'onclick="' + handler + '" ' : '') +
                 'style="font-size:10px;padding:3px 5px;border-radius:3px;margin-bottom:2px;' +
                 'background:' + it.color + '22;border-left:2px solid ' + it.color + ';' +
                 'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' +
                 (clickable ? 'cursor:pointer;' : '') + '" ' +
-                'title="' + escapeHtml(it.label) + (clickable ? ' (click to edit)' : '') + '">' +
+                'title="' + escapeHtml(it.label) + (clickable ? ' (click to open)' : '') + '">' +
                 escapeHtml(it.label) + '</div>';
             }).join('')
         ) +
@@ -897,9 +911,45 @@ async function homeTodayDrop(e) {
   }
 }
 
+function homeOpenCalEvent(id) {
+  id = parseInt(id);
+  // Delegate to calendar module if loaded, otherwise use _calEvs directly
+  if (typeof window.calOpenCalEvent === 'function') {
+    window.calOpenCalEvent(id);
+    return;
+  }
+  // Fallback: simple read-only modal using home's own _calEvs
+  var ev = _calEvs.find(function(c) { return parseInt(c.id) === id; });
+  if (!ev) return;
+  function field(label, value) {
+    if (!value) return '';
+    return '<div style="display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">' + label + '</div>' +
+      '<div style="font-size:13px;color:var(--text)">' + escapeHtml(String(value)) + '</div>' +
+    '</div>';
+  }
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:12px">' + escapeHtml(ev.title) + '</div>' +
+      field('Date', ev.date) +
+      field('Start Time', ev.startTime) +
+      field('End Time',   ev.endTime) +
+      '<div style="padding-top:14px;display:flex;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="hcev-close">Close</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('hcev-close').onclick = function() { document.body.removeChild(modal); };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
 window.homeRefresh        = homeRefresh;
 window.homeOpenEdit       = homeOpenEdit;
 window.homeOpenRealmLog   = homeOpenRealmLog;
+window.homeOpenCalEvent   = homeOpenCalEvent;
 window.homeAddNote        = homeAddNote;
 window.homeEditNote       = homeEditNote;
 window.homeDeleteNote     = homeDeleteNote;

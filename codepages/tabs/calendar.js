@@ -392,7 +392,7 @@ function _render() {
             ? 'calOpenCalEvent(' + ev.id + ')'
             : 'calOpenEdit(\'' + ev.type + '\',' + ev.id + ')';
           return '<div ' +
-            (clickable ? 'onclick="' + handler + '" ' : '') +
+            (clickable ? 'onmousedown="event.stopPropagation()" onclick="' + handler + '" ' : '') +
             'style="font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;' +
             'background:' + ev.color + '28;border-left:2px solid ' + ev.color + ';' +
             'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;' +
