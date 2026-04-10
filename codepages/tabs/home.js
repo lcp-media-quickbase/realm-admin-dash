@@ -5,7 +5,7 @@ var _tasks       = [];
 var _projects    = [];
 var _releases    = [];
 var _apps        = [];
-var _access      = [];
+var _appUsers    = {};
 var _appExpanded = {};
 var _icsEvs      = [];
 var _notes       = [];
@@ -107,10 +107,7 @@ async function _loadAll() {
     qbQueryAll(TABLES.tasks,          [3, 6, 7, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
     qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
-    Promise.all([
-      qbQueryAll(TABLES.apps,   [3, FIELD.APPS.id, FIELD.APPS.name, FIELD.APPS.openToInternet], null),
-      qbQueryAll(TABLES.access, [3, FIELD.ACCESS.userId, FIELD.ACCESS.appId, FIELD.ACCESS.permission, FIELD.ACCESS.lastAccessed, FIELD.ACCESS.appName, FIELD.ACCESS.userName], null),
-    ]),
+    qbQueryAll(TABLES.apps,   [3, FIELD.APPS.id, FIELD.APPS.name, FIELD.APPS.openToInternet], null),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
     qbQueryAll(TABLES.notes,          [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject, NF.relatedCalEvent], null, [{fieldId: 3, order: 'DESC'}]),
     (function() {
@@ -129,7 +126,7 @@ async function _loadAll() {
     };
   });
 
-  _apps = results[3][0].map(function(r) {
+  _apps = results[3].map(function(r) {
     return {
       id:             val(r, 3),
       appId:          val(r, FIELD.APPS.id)            || '',
@@ -137,16 +134,14 @@ async function _loadAll() {
       openToInternet: val(r, FIELD.APPS.openToInternet) || '',
     };
   });
-  _access = results[3][1].map(function(r) {
-    return {
-      id:           val(r, 3),
-      userId:       val(r, FIELD.ACCESS.userId)       || '',
-      appId:        val(r, FIELD.ACCESS.appId)        || '',
-      permission:   val(r, FIELD.ACCESS.permission)   || '',
-      lastAccessed: val(r, FIELD.ACCESS.lastAccessed) || '',
-      appName:      val(r, FIELD.ACCESS.appName)      || '',
-      userName:     val(r, FIELD.ACCESS.userName)     || '',
-    };
+
+  // Fetch users for each app via QB API_GetUsersForApp
+  var _userFetches = await Promise.all(_apps.map(function(app) {
+    return _fetchAppUsers(app.appId);
+  }));
+  _appUsers = {};
+  _apps.forEach(function(app, i) {
+    _appUsers[app.id] = _userFetches[i];
   });
 
   _icsEvs = results[4];
@@ -200,18 +195,36 @@ async function _loadAll() {
 }
 
 // ─── Realm Overview ───────────────────────────────────────────
+async function _fetchAppUsers(appDBID) {
+  if (!appDBID) return [];
+  try {
+    var ticket = (typeof gReqTkt !== 'undefined' && gReqTkt) ? gReqTkt : '';
+    var url = '/db/' + appDBID + '?a=API_GetUsersForApp' +
+              (ticket ? '&ticket=' + encodeURIComponent(ticket) : '');
+    var resp = await fetch(url, { method: 'GET', credentials: 'include' });
+    if (!resp.ok) return [];
+    var text = await resp.text();
+    var users = [];
+    var userRe = /<user[^>]+id="([^"]+)"[^>]*>([\s\S]*?)<\/user>/g;
+    var match;
+    while ((match = userRe.exec(text)) !== null) {
+      var userId = match[1];
+      var block  = match[2];
+      var name       = (block.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
+      var rolesBlock = (block.match(/<roles>([\s\S]*?)<\/roles>/) || [])[1] || '';
+      var role       = (rolesBlock.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
+      users.push({ userId: userId, name: name, role: role });
+    }
+    return users;
+  } catch(e) {
+    return [];
+  }
+}
+
 function _renderRealmOverview() {
   if (_apps.length === 0) {
     return '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No apps found</div></div>';
   }
-
-  var accessByApp = {};
-  _access.forEach(function(a) {
-    var key = String(a.appId);
-    if (!key || key === '0') return;
-    if (!accessByApp[key]) accessByApp[key] = [];
-    accessByApp[key].push(a);
-  });
 
   function permColor(p) {
     return !p                      ? 'var(--text-dim)' :
@@ -221,7 +234,7 @@ function _renderRealmOverview() {
   }
 
   var cards = _apps.map(function(app) {
-    var users    = accessByApp[String(app.id)] || [];
+    var users    = _appUsers[app.id] || [];
     var expanded = _appExpanded[app.id];
 
     var chevron = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
@@ -232,13 +245,11 @@ function _renderRealmOverview() {
       ? (users.length === 0
           ? '<div style="padding:8px 14px;font-size:12px;color:var(--text-dim);border-top:1px solid var(--border)">No users found</div>'
           : users.map(function(u) {
-              var color    = permColor(u.permission);
-              var lastDate = u.lastAccessed ? String(u.lastAccessed).split('T')[0] : '';
+              var color = permColor(u.role);
               return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--border)">' +
-                '<div style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(u.userName || u.userId || '—') + '</div>' +
+                '<div style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(u.name || u.userId || '—') + '</div>' +
                 '<span style="font-size:11px;font-weight:500;color:' + color + ';background:' + color + '1a;' +
-                  'padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0">' + escapeHtml(u.permission || '—') + '</span>' +
-                (lastDate ? '<div style="font-size:10px;color:var(--text-dim);white-space:nowrap;flex-shrink:0">' + escapeHtml(lastDate) + '</div>' : '') +
+                  'padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0">' + escapeHtml(u.role || '—') + '</span>' +
               '</div>';
             }).join(''))
       : '';
