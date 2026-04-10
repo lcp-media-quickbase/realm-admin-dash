@@ -549,7 +549,8 @@ function detectRole() {
 }
 
 async function resolveCurrentUser() {
-  if (_currentUser.email) return;
+  // Skip only if we already have both email and userId
+  if (_currentUser.email && _currentUser.userId) return;
   if (_authMode !== 'session') return;
   try {
     var ticket = (typeof gReqTkt !== 'undefined' && gReqTkt) ? gReqTkt : '';
@@ -559,9 +560,12 @@ async function resolveCurrentUser() {
     if (resp.ok) {
       var text = await resp.text();
       var emailMatch = text.match(/<email>([^<]+)<\/email>/);
-      if (emailMatch) _currentUser.email = emailMatch[1].toLowerCase();
+      if (emailMatch && !_currentUser.email) _currentUser.email = emailMatch[1].toLowerCase();
       var nameMatch = text.match(/<name>([^<]+)<\/name>/);
-      if (nameMatch) _currentUser.name = nameMatch[1];
+      if (nameMatch && !_currentUser.name) _currentUser.name = nameMatch[1];
+      // QB returns the user ID as the id attribute on the <user> element
+      var userIdMatch = text.match(/<user[^>]+id="([^"]+)"/);
+      if (userIdMatch) _currentUser.userId = userIdMatch[1];
     }
   } catch(e) { console.warn('[Auth] Could not resolve user email:', e); }
 }

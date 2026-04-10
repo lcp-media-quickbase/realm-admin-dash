@@ -97,6 +97,8 @@ registerTab('home', {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function _loadAll() {
+  // Ensure QB userId is resolved before filtering calendar events by user
+  if (typeof resolveCurrentUser === 'function') await resolveCurrentUser();
   var icsUrl = (window._icsUtils && window._icsUtils.getICSUrl) ? window._icsUtils.getICSUrl() : '';
 
   var RL = FIELD.REALM_LOGS;
