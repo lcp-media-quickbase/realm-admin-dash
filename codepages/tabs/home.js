@@ -931,17 +931,126 @@ function homeOpenCalEvent(id) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
   modal.innerHTML =
     '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
-      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
-      '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:12px">' + escapeHtml(ev.title) + '</div>' +
-      field('Date', ev.date) +
+      'border-radius:10px;padding:24px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
+        '<span style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(ev.title) + '</span>' +
+        '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:2px 8px;border-radius:10px">Calendar Event</span>' +
+      '</div>' +
+      field('Date',       String(ev.date).split('T')[0]) +
       field('Start Time', ev.startTime) +
       field('End Time',   ev.endTime) +
-      '<div style="padding-top:14px;display:flex;justify-content:flex-end">' +
-        '<button class="btn btn-sm" id="hcev-close">Close</button>' +
+      '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">' +
+        '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Create linked record for this event:</div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn btn-sm btn-primary" id="hcev-new-task">+ Task</button>' +
+          '<button class="btn btn-sm" id="hcev-new-note" style="border-color:#9b59b6;color:#9b59b6">+ Note</button>' +
+          '<button class="btn btn-sm" id="hcev-close" style="margin-left:auto">Close</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   document.body.appendChild(modal);
-  document.getElementById('hcev-close').onclick = function() { document.body.removeChild(modal); };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+  document.getElementById('hcev-close').onclick    = function() { document.body.removeChild(modal); };
+  document.getElementById('hcev-new-task').onclick = function() { document.body.removeChild(modal); _homeNewTaskForCalEvent(ev); };
+  document.getElementById('hcev-new-note').onclick = function() { document.body.removeChild(modal); _homeNewNoteForCalEvent(ev); };
+}
+
+function _homeNewTaskForCalEvent(ev) {
+  var date = String(ev.date).split('T')[0];
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  function row(lbl, content) {
+    return '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' + content + '</div>';
+  }
+  function inp(id, type, val) {
+    return '<input id="' + id + '" type="' + type + '" value="' + escapeHtml(val || '') + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">';
+  }
+  function sel(id, opts, def) {
+    return '<select id="' + id + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+      opts.map(function(o) { return '<option' + (o === def ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('') +
+    '</select>';
+  }
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #68B6E5;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Task</div>' +
+      '<div style="font-size:11px;color:var(--text-dim)">For: ' + escapeHtml(ev.title) + '</div>' +
+      row('Name *',       inp('htm-name', 'text', '')) +
+      row('Priority',     sel('htm-priority', ['03-Medium','01-Critical','02-High','04-Low'], '03-Medium')) +
+      row('Assigned To',  inp('htm-assigned', 'text', '')) +
+      row('Start Date',   inp('htm-start', 'date', date)) +
+      row('Est End Date', inp('htm-end', 'date', date)) +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="htm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="htm-save">Create</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('htm-name').focus();
+  document.getElementById('htm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('htm-save').onclick = async function() {
+    var name = document.getElementById('htm-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+    var btn = document.getElementById('htm-save');
+    btn.textContent = 'Saving…'; btn.disabled = true;
+    try {
+      var rec = {};
+      rec[FIELD.TASKS.name]       = { value: name };
+      rec[FIELD.TASKS.priority]   = { value: document.getElementById('htm-priority').value };
+      rec[FIELD.TASKS.assignedTo] = { value: document.getElementById('htm-assigned').value.trim() };
+      rec[FIELD.TASKS.status]     = { value: 'Open' };
+      var sd = document.getElementById('htm-start').value;
+      var ed = document.getElementById('htm-end').value;
+      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: ev.id };
+      await qbUpsert(TABLES.tasks, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Task created', 'success');
+      await _loadAll();
+    } catch(e) { showToast('Failed: ' + e.message, 'error'); btn.textContent = 'Create'; btn.disabled = false; }
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+function _homeNewNoteForCalEvent(ev) {
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  function row(lbl, content) {
+    return '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' + content + '</div>';
+  }
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Note</div>' +
+      '<div style="font-size:11px;color:var(--text-dim)">For: ' + escapeHtml(ev.title) + '</div>' +
+      row('Title *', '<input id="hnm-name" type="text" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">') +
+      row('Description', '<textarea id="hnm-desc" rows="4" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>') +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="hnm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="hnm-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('hnm-name').focus();
+  document.getElementById('hnm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('hnm-save').onclick = async function() {
+    var name = document.getElementById('hnm-name').value.trim();
+    if (!name) { showToast('Title is required', 'error'); return; }
+    var btn = document.getElementById('hnm-save');
+    btn.textContent = 'Saving…'; btn.disabled = true;
+    try {
+      var NF  = FIELD.NOTES;
+      var rec = {};
+      rec[NF.name]        = { value: name };
+      rec[NF.description] = { value: document.getElementById('hnm-desc').value.trim() };
+      if (NF.relatedCalEvent) rec[NF.relatedCalEvent] = { value: ev.id };
+      await qbUpsert(TABLES.notes, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Note saved', 'success');
+      await _loadAll();
+    } catch(e) { showToast('Failed: ' + e.message, 'error'); btn.textContent = 'Save'; btn.disabled = false; }
+  };
   modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
 }
 
