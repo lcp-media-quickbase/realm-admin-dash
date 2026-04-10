@@ -73,7 +73,7 @@ var ADMIN_ROLES = [ROLE.ADMINISTRATOR];           // admins only
 
 // ─── BUILD SHELL ─────────────────────────────────────────────
 // Runs after all tab JS files below have been loaded and registered.
-function buildDashboard() {
+async function buildDashboard() {
   window.buildDashboard = buildDashboard;
   document.body.innerHTML =
     renderAppHeader() +
@@ -109,15 +109,24 @@ function buildDashboard() {
     });
   }
 
+  // Resolve user identity BEFORE loading tabs so userId is available for per-user queries.
+  // Race against a 3s timeout so a slow/failed fetch doesn't block the dashboard.
+  if (typeof resolveCurrentUser === 'function') {
+    await Promise.race([
+      resolveCurrentUser(),
+      new Promise(function(resolve) { setTimeout(resolve, 3000); })
+    ]);
+  }
+  var _u = (typeof currentUser === 'function') ? currentUser() : {};
+  console.log('[Auth] Resolved — email:', _u.email || '(unknown)', 'userId:', _u.userId || '(unknown)');
+
+  if (typeof loadQBUsers === 'function') loadQBUsers();
+
   // Navigate to tab from URL hash, or default to first visible tab
   var hash    = window.location.hash.replace('#', '');
   var visible = getVisibleTabs();
   var startTab = (hash && _tabs[hash]) ? hash : (visible.length ? visible[0].id : null);
   if (startTab) switchTab(startTab);
-
-  // Resolve the logged-in user's email in the background
-  if (typeof resolveCurrentUser === 'function') resolveCurrentUser();
-  if (typeof loadQBUsers        === 'function') loadQBUsers();
 
   // Support browser back/forward navigation
   window.addEventListener('hashchange', function() {

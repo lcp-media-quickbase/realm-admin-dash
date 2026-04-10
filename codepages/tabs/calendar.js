@@ -100,8 +100,6 @@ registerTab('calendar', {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function _loadAll() {
-  // Ensure QB userId is resolved before filtering calendar events by user
-  if (typeof resolveCurrentUser === 'function') await resolveCurrentUser();
   var icsUrl = _getICSUrl();
   var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
