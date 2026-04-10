@@ -116,6 +116,7 @@ var FIELD = {
     date:      7,
     startTime: 8,
     endTime:   9,
+    uid:       14,
   },
 };
 
@@ -411,13 +412,32 @@ window._openEditModal = function(type, item, onAfterSave) {
                                : ['Active','In Progress','On Hold','Complete','Cancelled'];
   var priorityOptions = ['01-Critical','02-High','03-Medium','04-Low'];
 
+  // Calendar event dropdown — uses window._calEvs if available
+  function calEventSelectRow(fid, currentId) {
+    var evs = (window._calEvs || []);
+    var opts = '<option value="">— None —</option>' +
+      evs.map(function(c) {
+        var date = String(c.date).split('T')[0];
+        var selected = String(c.id) === String(currentId) ? ' selected' : '';
+        return '<option value="' + c.id + '"' + selected + '>' + escapeHtml(c.title) + ' (' + date + ')</option>';
+      }).join('');
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">Related Calendar Event</label>' +
+      '<select id="iem-' + fid + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+        'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        opts +
+      '</select>' +
+    '</div>';
+  }
+
   var fields = isTask
     ? row('Name',           'name',         item.name) +
       selectRow('Status',   'status',       item.status,   statusOptions) +
       selectRow('Priority', 'priority',     item.priority, priorityOptions) +
       row('Assigned To',    'assignedTo',   item.assignedTo) +
       row('Start Date',     'startDate',   (item.startDate   || '').split('T')[0], 'date') +
-      row('Est End Date',   'estEndDate',  (item.estEndDate  || '').split('T')[0], 'date')
+      row('Est End Date',   'estEndDate',  (item.estEndDate  || '').split('T')[0], 'date') +
+      calEventSelectRow('calEvent', item.relatedCalEvent)
     : isRelease
     ? row('Release Name',   'name',         item.name) +
       row('Start Date',     'startDate',   (item.startDate   || '').split('T')[0], 'date') +
@@ -458,9 +478,12 @@ window._openEditModal = function(type, item, onAfterSave) {
         };
         if (fval('startDate'))  rec[FIELD.TASKS.startDate]  = { value: fval('startDate') };
         if (fval('estEndDate')) rec[FIELD.TASKS.estEndDate]  = { value: fval('estEndDate') };
+        var calEvId = fval('calEvent');
+        if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: calEvId ? parseInt(calEvId) : '' };
         await qbUpsert(TABLES.tasks, [rec], [3]);
         updated = { name: fval('name'), status: fval('status'), priority: fval('priority'),
-          assignedTo: fval('assignedTo'), startDate: fval('startDate'), estEndDate: fval('estEndDate') };
+          assignedTo: fval('assignedTo'), startDate: fval('startDate'), estEndDate: fval('estEndDate'),
+          relatedCalEvent: calEvId ? parseInt(calEvId) : '' };
       } else if (isRelease) {
         var rec = {
           3:                            { value: item.id },

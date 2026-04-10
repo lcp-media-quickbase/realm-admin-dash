@@ -7,6 +7,7 @@ var _releases  = [];
 var _realmLogs = [];
 var _icsEvs    = [];
 var _notes     = [];
+var _calEvs    = [];
 
 // ─── Helpers ──────────────────────────────────────────────────
 function _toDateStr(d) {
@@ -95,13 +96,15 @@ async function _loadAll() {
 
   var RL = FIELD.REALM_LOGS;
   var NF = FIELD.NOTES;
+  var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
-    qbQueryAll(TABLES.tasks,    [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
-    qbQueryAll(TABLES.projects, [3, 16, 28, 27, 23, 24], null),
-    qbQueryAll(TABLES.releases, [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
-    qbQuery(TABLES.realmLogs,   [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
+    qbQueryAll(TABLES.tasks,          [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
+    qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
+    qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
+    qbQuery(TABLES.realmLogs,         [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
-    qbQueryAll(TABLES.notes, [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject], null, [{fieldId: 3, order: 'DESC'}]),
+    qbQueryAll(TABLES.notes,          [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject, NF.relatedCalEvent], null, [{fieldId: 3, order: 'DESC'}]),
+    qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.uid], null),
   ]);
 
   _releases = results[2].map(function(r) {
@@ -133,23 +136,35 @@ async function _loadAll() {
 
   _notes = results[5].map(function(r) {
     return {
-      id:             val(r, 3),
-      name:           val(r, NF.name)           || '',
-      description:    val(r, NF.description)    || '',
-      relatedTask:    val(r, NF.relatedTask)     || '',
-      relatedProject: val(r, NF.relatedProject) || '',
+      id:              val(r, 3),
+      name:            val(r, NF.name)            || '',
+      description:     val(r, NF.description)     || '',
+      relatedTask:     val(r, NF.relatedTask)      || '',
+      relatedProject:  val(r, NF.relatedProject)  || '',
+      relatedCalEvent: val(r, NF.relatedCalEvent) || '',
     };
   });
 
+  _calEvs = results[6].map(function(r) {
+    return {
+      id:    val(r, 3),
+      title: val(r, CE.title) || '',
+      date:  String(val(r, CE.date) || '').split('T')[0],
+      uid:   val(r, CE.uid)   || '',
+    };
+  });
+  window._calEvs = _calEvs;
+
   _tasks = results[0].map(function(r) {
     return {
-      id:         val(r, 3),
-      name:       val(r, FIELD.TASKS.name)       || '',
-      status:     val(r, FIELD.TASKS.status)     || '',
-      priority:   val(r, FIELD.TASKS.priority)   || '',
-      assignedTo: val(r, FIELD.TASKS.assignedTo) || '',
-      startDate:  val(r, FIELD.TASKS.startDate)  || '',
-      estEndDate: val(r, FIELD.TASKS.estEndDate) || '',
+      id:              val(r, 3),
+      name:            val(r, FIELD.TASKS.name)            || '',
+      status:          val(r, FIELD.TASKS.status)          || '',
+      priority:        val(r, FIELD.TASKS.priority)        || '',
+      assignedTo:      val(r, FIELD.TASKS.assignedTo)      || '',
+      startDate:       val(r, FIELD.TASKS.startDate)       || '',
+      estEndDate:      val(r, FIELD.TASKS.estEndDate)      || '',
+      relatedCalEvent: val(r, FIELD.TASKS.relatedCalEvent) || '',
     };
   });
 
@@ -635,6 +650,8 @@ function homeAddNote() {
     _tasks.map(function(t) { return '<option value="' + t.id + '">' + escapeHtml(t.name) + '</option>'; }).join('');
   var projectOptions = '<option value="">— None —</option>' +
     _projects.map(function(p) { return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>'; }).join('');
+  var calEventOptions = '<option value="">— None —</option>' +
+    _calEvs.map(function(c) { return '<option value="' + c.id + '">' + escapeHtml(c.title) + ' (' + c.date + ')</option>'; }).join('');
 
   var modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
@@ -649,8 +666,9 @@ function homeAddNote() {
           'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
             'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>' +
       '</div>' +
-      selectRow('Related Task (optional)', 'nm-task', taskOptions) +
-      selectRow('Related Project (optional)', 'nm-project', projectOptions) +
+      selectRow('Related Task (optional)',           'nm-task',     taskOptions) +
+      selectRow('Related Project (optional)',         'nm-project',  projectOptions) +
+      selectRow('Related Calendar Event (optional)', 'nm-calevent', calEventOptions) +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="nm-cancel">Cancel</button>' +
         '<button class="btn btn-sm btn-primary" id="nm-save">Save</button>' +
@@ -669,8 +687,10 @@ function homeAddNote() {
       rec[NF.description] = { value: document.getElementById('nm-desc').value.trim() };
       var taskId    = document.getElementById('nm-task').value;
       var projectId = document.getElementById('nm-project').value;
-      if (taskId)    rec[NF.relatedTask]    = { value: parseInt(taskId) };
-      if (projectId) rec[NF.relatedProject] = { value: parseInt(projectId) };
+      var calEvId   = document.getElementById('nm-calevent').value;
+      if (taskId)    rec[NF.relatedTask]      = { value: parseInt(taskId) };
+      if (projectId) rec[NF.relatedProject]   = { value: parseInt(projectId) };
+      if (calEvId)   rec[NF.relatedCalEvent]  = { value: parseInt(calEvId) };
       await qbUpsert(TABLES.notes, [rec], [3]);
       document.body.removeChild(modal);
       showToast('Note saved', 'success');
@@ -714,6 +734,10 @@ function homeEditNote(id) {
     _projects.map(function(p) {
       return '<option value="' + p.id + '"' + (String(n.relatedProject) === String(p.id) ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>';
     }).join('');
+  var calEventOptions = '<option value="">— None —</option>' +
+    _calEvs.map(function(c) {
+      return '<option value="' + c.id + '"' + (String(n.relatedCalEvent) === String(c.id) ? ' selected' : '') + '>' + escapeHtml(c.title) + ' (' + c.date + ')</option>';
+    }).join('');
 
   var modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
@@ -730,8 +754,9 @@ function homeEditNote(id) {
           escapeHtml(n.description || '') +
         '</textarea>' +
       '</div>' +
-      selectRow('Related Task (optional)', 'nem-task', taskOptions) +
-      selectRow('Related Project (optional)', 'nem-project', projectOptions) +
+      selectRow('Related Task (optional)',           'nem-task',     taskOptions) +
+      selectRow('Related Project (optional)',         'nem-project',  projectOptions) +
+      selectRow('Related Calendar Event (optional)', 'nem-calevent', calEventOptions) +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="nem-cancel">Cancel</button>' +
         '<button class="btn btn-sm btn-primary" id="nem-save">Save</button>' +
@@ -749,8 +774,10 @@ function homeEditNote(id) {
       rec[NF.description] = { value: document.getElementById('nem-desc').value.trim() };
       var taskId    = document.getElementById('nem-task').value;
       var projectId = document.getElementById('nem-project').value;
-      rec[NF.relatedTask]    = { value: taskId    ? parseInt(taskId)    : '' };
-      rec[NF.relatedProject] = { value: projectId ? parseInt(projectId) : '' };
+      var calEvId   = document.getElementById('nem-calevent').value;
+      rec[NF.relatedTask]      = { value: taskId    ? parseInt(taskId)    : '' };
+      rec[NF.relatedProject]   = { value: projectId ? parseInt(projectId) : '' };
+      rec[NF.relatedCalEvent]  = { value: calEvId   ? parseInt(calEvId)   : '' };
       await qbUpsert(TABLES.notes, [rec], [3]);
       document.body.removeChild(modal);
       showToast('Note saved', 'success');

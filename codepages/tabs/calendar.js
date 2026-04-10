@@ -5,6 +5,7 @@ var _projects    = [];
 var _tasks       = [];
 var _releases    = [];
 var _icsEvents   = [];
+var _calEvs      = [];   // QB Calendar Events records
 var _year        = new Date().getFullYear();
 var _month       = new Date().getMonth();
 var _dragItem    = null;   // { type: 'task'|'project', id }
@@ -56,6 +57,7 @@ function _parseICS(text) {
     if      (key === 'DTSTART')  ev.start = _parseICSDate(val);
     else if (key === 'DTEND')    ev.end   = _parseICSDate(val);
     else if (key === 'SUMMARY')  ev.name  = val.replace(/\\,/g,',').replace(/\\n/g,' ').trim();
+    else if (key === 'UID')      ev.uid   = val.trim();
   });
   return events;
 }
@@ -99,11 +101,13 @@ registerTab('calendar', {
 // ─── Data Loading ─────────────────────────────────────────────
 async function _loadAll() {
   var icsUrl = _getICSUrl();
+  var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
-    qbQueryAll(TABLES.projects,  [3, 16, 28, 27, 23, 24], null),
-    qbQueryAll(TABLES.tasks,     [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate], null),
-    qbQueryAll(TABLES.releases,  [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
+    qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
+    qbQueryAll(TABLES.tasks,          [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
+    qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     _fetchICS(icsUrl),
+    qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.startTime, CE.endTime, CE.uid], null),
   ]);
 
   _projects = results[0].map(function(r) {
@@ -118,13 +122,14 @@ async function _loadAll() {
 
   _tasks = results[1].map(function(r) {
     return {
-      id:         val(r, 3),
-      name:       val(r, FIELD.TASKS.name)      || '',
-      status:     val(r, FIELD.TASKS.status)    || '',
-      priority:   val(r, FIELD.TASKS.priority)  || '',
-      assignedTo: val(r, FIELD.TASKS.assignedTo)|| '',
-      startDate:  val(r, FIELD.TASKS.startDate) || '',
-      estEndDate: val(r, FIELD.TASKS.estEndDate)|| '',
+      id:              val(r, 3),
+      name:            val(r, FIELD.TASKS.name)           || '',
+      status:          val(r, FIELD.TASKS.status)         || '',
+      priority:        val(r, FIELD.TASKS.priority)       || '',
+      assignedTo:      val(r, FIELD.TASKS.assignedTo)     || '',
+      startDate:       val(r, FIELD.TASKS.startDate)      || '',
+      estEndDate:      val(r, FIELD.TASKS.estEndDate)     || '',
+      relatedCalEvent: val(r, FIELD.TASKS.relatedCalEvent)|| '',
     };
   });
 
@@ -138,6 +143,73 @@ async function _loadAll() {
   });
 
   _icsEvents = results[3];
+
+  _calEvs = results[4].map(function(r) {
+    return {
+      id:        val(r, 3),
+      title:     val(r, CE.title)     || '',
+      date:      String(val(r, CE.date) || '').split('T')[0],  // normalise to YYYY-MM-DD
+      startTime: val(r, CE.startTime) || '',
+      endTime:   val(r, CE.endTime)   || '',
+      uid:       val(r, CE.uid)       || '',
+    };
+  });
+  window._calEvs = _calEvs;
+
+  // Sync ICS events to QB — create a record for any ICS event not already stored
+  await _syncICSToQB();
+}
+
+// ─── ICS → QB sync ────────────────────────────────────────────
+async function _syncICSToQB() {
+  if (!_icsEvents.length) return;
+  var CE = FIELD.CALENDAR_EVENTS;
+  var toCreate = [];
+
+  _icsEvents.forEach(function(ev) {
+    var date = ev.start || '';
+    var uid  = ev.uid   || '';
+
+    // Match by UID first (reliable), fall back to title+date (legacy)
+    var existing = uid
+      ? _calEvs.find(function(c) { return c.uid === uid; })
+      : _calEvs.find(function(c) { return c.title === ev.name && c.date === date; });
+
+    if (!existing) {
+      var rec = {};
+      rec[CE.title] = { value: ev.name };
+      rec[CE.date]  = { value: date };
+      if (uid)           rec[CE.uid]       = { value: uid };
+      if (ev.startTime)  rec[CE.startTime] = { value: ev.startTime };
+      if (ev.endTime)    rec[CE.endTime]   = { value: ev.endTime };
+      toCreate.push(rec);
+    } else if (uid && !existing.uid) {
+      // Back-fill UID onto a legacy record that was matched by title+date
+      var patch = { 3: { value: existing.id } };
+      patch[CE.uid] = { value: uid };
+      qbUpsert(TABLES.calendarEvents, [patch], [3]).catch(function() {});
+      existing.uid = uid;
+    }
+  });
+
+  if (!toCreate.length) return;
+  try {
+    var result = await qbUpsert(TABLES.calendarEvents, toCreate, [3, CE.title, CE.date, CE.uid]);
+    (result.data || []).forEach(function(r) {
+      var newRec = {
+        id:        val(r, 3),
+        title:     val(r, CE.title) || '',
+        date:      String(val(r, CE.date) || '').split('T')[0],
+        startTime: '',
+        endTime:   '',
+        uid:       val(r, CE.uid) || '',
+      };
+      _calEvs.push(newRec);
+    });
+    window._calEvs = _calEvs;
+  } catch(e) {
+    console.warn('[Cal] ICS sync failed:', e.message);
+  }
 }
 
 // ─── Events on a given date ───────────────────────────────────
@@ -160,7 +232,12 @@ function _eventsForDate(ds) {
   });
   _icsEvents.forEach(function(ev) {
     var s = ev.start, e = ev.end || ev.start;
-    if (ds >= s && ds <= e) evs.push({ label: ev.name, color: COLOR.ics, type: 'ics', id: null });
+    if (ds >= s && ds <= e) {
+      var qbRec = ev.uid
+        ? _calEvs.find(function(c) { return c.uid === ev.uid; })
+        : _calEvs.find(function(c) { return c.title === ev.name && c.date === ev.start; });
+      evs.push({ label: ev.name, color: COLOR.ics, type: 'ics', id: qbRec ? qbRec.id : null });
+    }
   });
   return evs;
 }
@@ -310,14 +387,17 @@ function _render() {
         '<div style="font-size:12px;font-weight:' + (isToday ? '700':'500') + ';' +
           'color:' + (isToday ? 'var(--accent)':'var(--text)') + ';margin-bottom:3px">' + date.getDate() + '</div>' +
         evs.map(function(ev) {
-          var clickable = ev.type !== 'ics' && ev.id;
+          var clickable = ev.id != null;
+          var handler = ev.type === 'ics'
+            ? 'calOpenCalEvent(' + ev.id + ')'
+            : 'calOpenEdit(\'' + ev.type + '\',' + ev.id + ')';
           return '<div ' +
-            (clickable ? 'onclick="calOpenEdit(\'' + ev.type + '\',' + ev.id + ')" ' : '') +
+            (clickable ? 'onclick="' + handler + '" ' : '') +
             'style="font-size:10px;padding:2px 5px;border-radius:3px;margin-bottom:2px;' +
             'background:' + ev.color + '28;border-left:2px solid ' + ev.color + ';' +
             'color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;' +
             (clickable ? 'cursor:pointer;' : '') + '" ' +
-            'title="' + escapeHtml(ev.label) + (clickable ? ' (click to edit)' : '') + '">' +
+            'title="' + escapeHtml(ev.label) + (clickable ? ' (click to open)' : '') + '">' +
             escapeHtml(ev.label) +
           '</div>';
         }).join('') +
@@ -556,13 +636,165 @@ function calOpenEdit(type, id) {
   window._openEditModal(type, item, _render);
 }
 
+// ─── Calendar Event modal (ICS events) ───────────────────────
+function calOpenCalEvent(id) {
+  id = parseInt(id);
+  var ev = _calEvs.find(function(c) { return parseInt(c.id) === id; });
+  if (!ev) return;
+
+  function field(label, value) {
+    if (!value) return '';
+    return '<div style="display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">' + label + '</div>' +
+      '<div style="font-size:13px;color:var(--text)">' + escapeHtml(String(value)) + '</div>' +
+    '</div>';
+  }
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid ' + COLOR.ics + ';' +
+      'border-radius:10px;padding:24px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
+        '<span style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(ev.title) + '</span>' +
+        '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:2px 8px;border-radius:10px">Calendar Event</span>' +
+      '</div>' +
+      field('Date',       String(ev.date).split('T')[0]) +
+      field('Start Time', ev.startTime) +
+      field('End Time',   ev.endTime) +
+      '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">' +
+        '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Create linked record for this event:</div>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn btn-sm btn-primary" id="cev-new-task">+ Task</button>' +
+          '<button class="btn btn-sm" id="cev-new-note" style="border-color:#9b59b6;color:#9b59b6">+ Note</button>' +
+          '<button class="btn btn-sm" id="cev-close" style="margin-left:auto">Close</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+  document.getElementById('cev-close').onclick = function() { document.body.removeChild(modal); };
+
+  document.getElementById('cev-new-task').onclick = function() {
+    document.body.removeChild(modal);
+    _openNewTaskForCalEvent(ev);
+  };
+  document.getElementById('cev-new-note').onclick = function() {
+    document.body.removeChild(modal);
+    _openNewNoteForCalEvent(ev);
+  };
+}
+
+function _openNewTaskForCalEvent(ev) {
+  var date = String(ev.date).split('T')[0];
+  // Pre-fill name and dates, then open the shared new-task flow via a temporary shim
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+
+  function selectHtml(id, options, selected) {
+    return '<select id="' + id + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+      options.map(function(o) { return '<option' + (o === selected ? ' selected' : '') + '>' + escapeHtml(o) + '</option>'; }).join('') +
+    '</select>';
+  }
+  function inputHtml(id, type, value) {
+    return '<input id="' + id + '" type="' + type + '" value="' + escapeHtml(value || '') + '" ' +
+      'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">';
+  }
+  function row(lbl, content) {
+    return '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' + content + '</div>';
+  }
+
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #68B6E5;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Task</div>' +
+      '<div style="font-size:11px;color:var(--text-dim)">For: ' + escapeHtml(ev.title) + '</div>' +
+      row('Name *',       inputHtml('ctm-name', 'text', '')) +
+      row('Priority',     selectHtml('ctm-priority', ['03-Medium','01-Critical','02-High','04-Low'], '03-Medium')) +
+      row('Assigned To',  inputHtml('ctm-assigned', 'text', '')) +
+      row('Start Date',   inputHtml('ctm-start', 'date', date)) +
+      row('Est End Date', inputHtml('ctm-end', 'date', date)) +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="ctm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="ctm-save">Create</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('ctm-name').focus();
+  document.getElementById('ctm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('ctm-save').onclick = async function() {
+    var name = document.getElementById('ctm-name').value.trim();
+    if (!name) { showToast('Name is required', 'error'); return; }
+    try {
+      var rec = {};
+      rec[FIELD.TASKS.name]       = { value: name };
+      rec[FIELD.TASKS.priority]   = { value: document.getElementById('ctm-priority').value };
+      rec[FIELD.TASKS.assignedTo] = { value: document.getElementById('ctm-assigned').value.trim() };
+      rec[FIELD.TASKS.status]     = { value: 'Open' };
+      var sd = document.getElementById('ctm-start').value;
+      var ed = document.getElementById('ctm-end').value;
+      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: ev.id };
+      await qbUpsert(TABLES.tasks, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Task created', 'success');
+      await _loadAll();
+      _render();
+    } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
+function _openNewNoteForCalEvent(ev) {
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+
+  function row(lbl, content) {
+    return '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' + content + '</div>';
+  }
+
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;padding:24px;width:400px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">New Note</div>' +
+      '<div style="font-size:11px;color:var(--text-dim)">For: ' + escapeHtml(ev.title) + '</div>' +
+      row('Title *', '<input id="cnm-name" type="text" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">') +
+      row('Description', '<textarea id="cnm-desc" rows="4" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea>') +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="cnm-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="cnm-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('cnm-name').focus();
+  document.getElementById('cnm-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('cnm-save').onclick = async function() {
+    var name = document.getElementById('cnm-name').value.trim();
+    if (!name) { showToast('Title is required', 'error'); return; }
+    try {
+      var NF  = FIELD.NOTES;
+      var rec = {};
+      rec[NF.name]        = { value: name };
+      rec[NF.description] = { value: document.getElementById('cnm-desc').value.trim() };
+      if (NF.relatedCalEvent) rec[NF.relatedCalEvent] = { value: ev.id };
+      await qbUpsert(TABLES.notes, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Note saved', 'success');
+    } catch(e) { showToast('Failed: ' + e.message, 'error'); }
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
 // ─── Window exports ───────────────────────────────────────────
-window.calPrevMonth   = calPrevMonth;
-window.calNextMonth   = calNextMonth;
-window.calRefresh     = calRefresh;
-window.calICSSettings = calICSSettings;
-window.calDragStart   = calDragStart;
-window.calDrop        = calDrop;
-window.calOpenEdit    = calOpenEdit;
+window.calPrevMonth    = calPrevMonth;
+window.calNextMonth    = calNextMonth;
+window.calRefresh      = calRefresh;
+window.calICSSettings  = calICSSettings;
+window.calDragStart    = calDragStart;
+window.calDrop         = calDrop;
+window.calOpenEdit     = calOpenEdit;
+window.calOpenCalEvent = calOpenCalEvent;
 
 })();
