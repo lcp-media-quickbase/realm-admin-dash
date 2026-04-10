@@ -104,7 +104,7 @@ async function _loadAll() {
   var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
     qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
-    qbQueryAll(TABLES.tasks,          [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
+    qbQueryAll(TABLES.tasks,          [3, 6, 7, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
     qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     _fetchICS(icsUrl),
     (function() {
@@ -128,6 +128,7 @@ async function _loadAll() {
     return {
       id:              val(r, 3),
       name:            val(r, FIELD.TASKS.name)           || '',
+      description:     val(r, FIELD.TASKS.description)    || '',
       status:          val(r, FIELD.TASKS.status)         || '',
       priority:        val(r, FIELD.TASKS.priority)       || '',
       assignedTo:      val(r, FIELD.TASKS.assignedTo)     || '',
@@ -721,6 +722,7 @@ function _openNewTaskForCalEvent(ev) {
       row('Assigned To',  inputHtml('ctm-assigned', 'text', '')) +
       row('Start Date',   inputHtml('ctm-start', 'date', date)) +
       row('Est End Date', inputHtml('ctm-end', 'date', date)) +
+      '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">Description</label><textarea id="ctm-description" rows="3" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea></div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="ctm-cancel">Cancel</button>' +
         '<button class="btn btn-sm btn-primary" id="ctm-save">Create</button>' +
@@ -740,8 +742,9 @@ function _openNewTaskForCalEvent(ev) {
       rec[FIELD.TASKS.status]     = { value: 'Open' };
       var sd = document.getElementById('ctm-start').value;
       var ed = document.getElementById('ctm-end').value;
-      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
-      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      if (sd) rec[FIELD.TASKS.startDate]    = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate]   = { value: ed };
+      rec[FIELD.TASKS.description] = { value: document.getElementById('ctm-description').value.trim() };
       if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: ev.id };
       await qbUpsert(TABLES.tasks, [rec], [3]);
       document.body.removeChild(modal);

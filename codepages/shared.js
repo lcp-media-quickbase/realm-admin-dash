@@ -396,6 +396,17 @@ window._openEditModal = function(type, item, onAfterSave) {
     '</div>';
   }
 
+  function textareaRow(lbl, fid, value) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<textarea id="iem-' + fid + '" rows="3" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical">' +
+        escapeHtml(value || '') +
+      '</textarea>' +
+    '</div>';
+  }
+
   function selectRow(lbl, fid, value, options) {
     return '<div style="display:flex;flex-direction:column;gap:4px">' +
       '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
@@ -438,6 +449,7 @@ window._openEditModal = function(type, item, onAfterSave) {
       row('Assigned To',    'assignedTo',   item.assignedTo) +
       row('Start Date',     'startDate',   (item.startDate   || '').split('T')[0], 'date') +
       row('Est End Date',   'estEndDate',  (item.estEndDate  || '').split('T')[0], 'date') +
+      textareaRow('Description', 'description', item.description) +
       calEventSelectRow('calEvent', item.relatedCalEvent)
     : isRelease
     ? row('Release Name',   'name',         item.name) +
@@ -477,14 +489,15 @@ window._openEditModal = function(type, item, onAfterSave) {
           [FIELD.TASKS.priority]:   { value: fval('priority') },
           [FIELD.TASKS.assignedTo]: { value: fval('assignedTo') },
         };
-        if (fval('startDate'))  rec[FIELD.TASKS.startDate]  = { value: fval('startDate') };
-        if (fval('estEndDate')) rec[FIELD.TASKS.estEndDate]  = { value: fval('estEndDate') };
+        if (fval('startDate'))    rec[FIELD.TASKS.startDate]    = { value: fval('startDate') };
+        if (fval('estEndDate'))   rec[FIELD.TASKS.estEndDate]   = { value: fval('estEndDate') };
+        rec[FIELD.TASKS.description] = { value: fval('description') };
         var calEvId = fval('calEvent');
         if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: calEvId ? parseInt(calEvId) : '' };
         await qbUpsert(TABLES.tasks, [rec], [3]);
         updated = { name: fval('name'), status: fval('status'), priority: fval('priority'),
           assignedTo: fval('assignedTo'), startDate: fval('startDate'), estEndDate: fval('estEndDate'),
-          relatedCalEvent: calEvId ? parseInt(calEvId) : '' };
+          description: fval('description'), relatedCalEvent: calEvId ? parseInt(calEvId) : '' };
       } else if (isRelease) {
         var rec = {
           3:                            { value: item.id },

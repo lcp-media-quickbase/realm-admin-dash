@@ -103,7 +103,7 @@ async function _loadAll() {
   var NF = FIELD.NOTES;
   var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
-    qbQueryAll(TABLES.tasks,          [3, 6, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
+    qbQueryAll(TABLES.tasks,          [3, 6, 7, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
     qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     qbQuery(TABLES.realmLogs,         [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
@@ -168,6 +168,7 @@ async function _loadAll() {
     return {
       id:              val(r, 3),
       name:            val(r, FIELD.TASKS.name)            || '',
+      description:     val(r, FIELD.TASKS.description)     || '',
       status:          val(r, FIELD.TASKS.status)          || '',
       priority:        val(r, FIELD.TASKS.priority)        || '',
       assignedTo:      val(r, FIELD.TASKS.assignedTo)      || '',
@@ -853,6 +854,7 @@ function homeNewTask() {
       inputRow('Assigned To', 'ntm-assignedTo', 'text', '') +
       inputRow('Start Date', 'ntm-startDate', 'date', '') +
       inputRow('Est End Date', 'ntm-estEndDate', 'date', '') +
+      '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">Description</label><textarea id="ntm-description" rows="3" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea></div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="ntm-cancel">Cancel</button>' +
         '<button class="btn btn-sm btn-primary" id="ntm-save">Create</button>' +
@@ -872,8 +874,9 @@ function homeNewTask() {
       rec[FIELD.TASKS.status]     = { value: 'Open' };
       var sd = document.getElementById('ntm-startDate').value;
       var ed = document.getElementById('ntm-estEndDate').value;
-      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
-      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      if (sd) rec[FIELD.TASKS.startDate]    = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate]   = { value: ed };
+      rec[FIELD.TASKS.description] = { value: document.getElementById('ntm-description').value.trim() };
       await qbUpsert(TABLES.tasks, [rec], [3]);
       document.body.removeChild(modal);
       showToast('Task created', 'success');
@@ -980,6 +983,7 @@ function _homeNewTaskForCalEvent(ev) {
       row('Assigned To',  inp('htm-assigned', 'text', '')) +
       row('Start Date',   inp('htm-start', 'date', date)) +
       row('Est End Date', inp('htm-end', 'date', date)) +
+      '<div style="display:flex;flex-direction:column;gap:4px"><label style="font-size:11px;color:var(--text-muted)">Description</label><textarea id="htm-description" rows="3" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical"></textarea></div>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end">' +
         '<button class="btn btn-sm" id="htm-cancel">Cancel</button>' +
         '<button class="btn btn-sm btn-primary" id="htm-save">Create</button>' +
@@ -1001,8 +1005,9 @@ function _homeNewTaskForCalEvent(ev) {
       rec[FIELD.TASKS.status]     = { value: 'Open' };
       var sd = document.getElementById('htm-start').value;
       var ed = document.getElementById('htm-end').value;
-      if (sd) rec[FIELD.TASKS.startDate]  = { value: sd };
-      if (ed) rec[FIELD.TASKS.estEndDate] = { value: ed };
+      if (sd) rec[FIELD.TASKS.startDate]    = { value: sd };
+      if (ed) rec[FIELD.TASKS.estEndDate]   = { value: ed };
+      rec[FIELD.TASKS.description] = { value: document.getElementById('htm-description').value.trim() };
       if (FIELD.TASKS.relatedCalEvent) rec[FIELD.TASKS.relatedCalEvent] = { value: ev.id };
       await qbUpsert(TABLES.tasks, [rec], [3]);
       document.body.removeChild(modal);
