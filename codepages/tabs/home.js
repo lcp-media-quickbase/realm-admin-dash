@@ -199,20 +199,20 @@ async function _fetchAppUsers(appDBID) {
   if (!appDBID) return [];
   try {
     var ticket = (typeof gReqTkt !== 'undefined' && gReqTkt) ? gReqTkt : '';
-    var url = '/db/' + appDBID + '?a=API_GetUsersForApp' +
+    var url = 'https://' + QB_REALM + '/db/' + appDBID + '?a=API_UserRoles' +
               (ticket ? '&ticket=' + encodeURIComponent(ticket) : '');
     var resp = await fetch(url, { method: 'GET', credentials: 'include' });
     if (!resp.ok) return [];
     var text = await resp.text();
     var users = [];
+    // API_UserRoles response: <user id="..."><name>...</name><roles><role name="..."/></roles></user>
     var userRe = /<user[^>]+id="([^"]+)"[^>]*>([\s\S]*?)<\/user>/g;
     var match;
     while ((match = userRe.exec(text)) !== null) {
       var userId = match[1];
       var block  = match[2];
-      var name       = (block.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
-      var rolesBlock = (block.match(/<roles>([\s\S]*?)<\/roles>/) || [])[1] || '';
-      var role       = (rolesBlock.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
+      var name = (block.match(/<name>([^<]+)<\/name>/) || [])[1] || '';
+      var role = (block.match(/<role[^>]+name="([^"]+)"/) || [])[1] || '';
       users.push({ userId: userId, name: name, role: role });
     }
     return users;

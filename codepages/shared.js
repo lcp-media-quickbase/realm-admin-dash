@@ -18,10 +18,6 @@ var LOGO_LIGHT = '';  // Color lockup shown in light mode
 
 // ─── QUICKBASE CONFIG ────────────────────────────────────────
 var QB_REALM = 'lcpmedia.quickbase.com';
-// Auto-detect realm when running on a QB Code Page
-if (typeof window !== 'undefined' && window.location.hostname.endsWith('.quickbase.com')) {
-  QB_REALM = window.location.hostname;
-}
 var QB_APP = 'btnit6q26';   // App DBID from the QB URL
 
 // ─── TABLES ──────────────────────────────────────────────────
