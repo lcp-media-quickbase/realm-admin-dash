@@ -776,13 +776,26 @@ function homeEditNote(id) {
       selectRow('Related Task (optional)',           'nem-task',     taskOptions) +
       selectRow('Related Project (optional)',         'nem-project',  projectOptions) +
       selectRow('Related Calendar Event (optional)', 'nem-calevent', calEventOptions) +
-      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
-        '<button class="btn btn-sm" id="nem-cancel">Cancel</button>' +
-        '<button class="btn btn-sm btn-primary" id="nem-save">Save</button>' +
+      '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">' +
+        '<button class="btn btn-sm" id="nem-delete" style="color:var(--danger);border-color:var(--danger)">Delete</button>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn btn-sm" id="nem-cancel">Cancel</button>' +
+          '<button class="btn btn-sm btn-primary" id="nem-save">Save</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   document.body.appendChild(modal);
   document.getElementById('nem-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('nem-delete').onclick = async function() {
+    if (!confirm('Delete note "' + (n.name || '') + '"?\n\nThis cannot be undone.')) return;
+    try {
+      await qbDelete(TABLES.notes, '{3.EX.' + n.id + '}');
+      document.body.removeChild(modal);
+      showToast('Note deleted', 'success');
+      await _loadAll();
+      _render();
+    } catch(e) { showToast('Delete failed: ' + e.message, 'error'); }
+  };
   document.getElementById('nem-save').onclick = async function() {
     var name = document.getElementById('nem-name').value.trim();
     if (!name) { showToast('Title is required', 'error'); return; }

@@ -468,14 +468,32 @@ window._openEditModal = function(type, item, onAfterSave) {
       'border-radius:10px;padding:24px;width:400px;display:flex;flex-direction:column;gap:14px;max-height:90vh;overflow-y:auto">' +
       '<div style="font-size:15px;font-weight:600;color:var(--text)">' + title + '</div>' +
       fields +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;padding-top:4px">' +
-        '<button class="btn btn-sm" id="iem-cancel">Cancel</button>' +
-        '<button class="btn btn-sm btn-primary" id="iem-save">Save</button>' +
+      '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;padding-top:4px">' +
+        '<button class="btn btn-sm" id="iem-delete" style="color:var(--danger);border-color:var(--danger)">Delete</button>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn btn-sm" id="iem-cancel">Cancel</button>' +
+          '<button class="btn btn-sm btn-primary" id="iem-save">Save</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   document.body.appendChild(modal);
 
   document.getElementById('iem-cancel').onclick = function() { document.body.removeChild(modal); };
+
+  document.getElementById('iem-delete').onclick = async function() {
+    var label = isTask ? 'task' : isRelease ? 'release' : 'project';
+    var name  = item.name || item.releaseName || '';
+    if (!confirm('Delete this ' + label + (name ? ' "' + name + '"' : '') + '?\n\nThis cannot be undone.')) return;
+    try {
+      var table = isTask ? TABLES.tasks : isRelease ? TABLES.releases : TABLES.projects;
+      await qbDelete(table, '{3.EX.' + item.id + '}');
+      document.body.removeChild(modal);
+      showToast((label.charAt(0).toUpperCase() + label.slice(1)) + ' deleted', 'success');
+      if (typeof onAfterSave === 'function') onAfterSave();
+    } catch(e) {
+      showToast('Delete failed: ' + e.message, 'error');
+    }
+  };
 
   document.getElementById('iem-save').onclick = async function() {
     function fval(fid) { var el = document.getElementById('iem-' + fid); return el ? el.value.trim() : ''; }
