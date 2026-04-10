@@ -109,7 +109,11 @@ async function _loadAll() {
     qbQuery(TABLES.realmLogs,         [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
     qbQueryAll(TABLES.notes,          [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject, NF.relatedCalEvent], null, [{fieldId: 3, order: 'DESC'}]),
-    qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.uid], null),
+    (function() {
+      var userId = currentUser().userId;
+      var where  = userId ? '{' + CE.assignedUser + '.EX.' + userId + '}' : null;
+      return qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.uid], where);
+    })(),
   ]);
 
   _releases = results[2].map(function(r) {
@@ -913,12 +917,7 @@ async function homeTodayDrop(e) {
 
 function homeOpenCalEvent(id) {
   id = parseInt(id);
-  // Delegate to calendar module if loaded, otherwise use _calEvs directly
-  if (typeof window.calOpenCalEvent === 'function') {
-    window.calOpenCalEvent(id);
-    return;
-  }
-  // Fallback: simple read-only modal using home's own _calEvs
+  // Always use home's own _calEvs — calendar tab may not have loaded yet
   var ev = _calEvs.find(function(c) { return parseInt(c.id) === id; });
   if (!ev) return;
   function field(label, value) {

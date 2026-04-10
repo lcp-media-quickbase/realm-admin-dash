@@ -112,11 +112,12 @@ var FIELD = {
     relatedCalEvent:   13,
   },
   CALENDAR_EVENTS: {
-    title:     6,
-    date:      7,
-    startTime: 8,
-    endTime:   9,
-    uid:       14,
+    title:        6,
+    date:         7,
+    startTime:    8,
+    endTime:      9,
+    uid:          14,
+    assignedUser: 15,
   },
 };
 
@@ -537,10 +538,13 @@ function detectRole() {
   if (typeof gReqEmail !== 'undefined' && gReqEmail)   _currentUser.email = gReqEmail;
   else if (typeof gUserEmail  !== 'undefined' && gUserEmail)  _currentUser.email = gUserEmail;
   else if (typeof gLoginEmail !== 'undefined' && gLoginEmail) _currentUser.email = gLoginEmail;
+  // QB injects gUserID as the numeric QB user ID (e.g. "12345.sbqg")
+  if (typeof gUserID !== 'undefined' && gUserID) _currentUser.userId = String(gUserID);
   // Fallback for local dev — default to admin
-  if (!_currentUser.role) _currentUser.role = ROLE.ADMIN;
-  _currentUser.isAdmin = (_currentUser.role === ROLE.ADMIN);
-  console.log('[Role] Detected:', _currentUser.role, 'isAdmin:', _currentUser.isAdmin, 'email:', _currentUser.email || '(unknown)');
+  if (!_currentUser.role) _currentUser.role = ROLE.ADMINISTRATOR;
+  _currentUser.isAdmin = (_currentUser.role === ROLE.ADMINISTRATOR);
+  console.log('[Role] Detected:', _currentUser.role, 'isAdmin:', _currentUser.isAdmin,
+    'email:', _currentUser.email || '(unknown)', 'userId:', _currentUser.userId || '(unknown)');
   return _currentUser;
 }
 

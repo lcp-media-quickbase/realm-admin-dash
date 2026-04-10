@@ -107,7 +107,11 @@ async function _loadAll() {
     qbQueryAll(TABLES.tasks,          [3, 6, 12, 13, 125, 48, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
     qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
     _fetchICS(icsUrl),
-    qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.startTime, CE.endTime, CE.uid], null),
+    (function() {
+      var userId = currentUser().userId;
+      var where  = userId ? '{' + CE.assignedUser + '.EX.' + userId + '}' : null;
+      return qbQueryAll(TABLES.calendarEvents, [3, CE.title, CE.date, CE.startTime, CE.endTime, CE.uid], where);
+    })(),
   ]);
 
   _projects = results[0].map(function(r) {
@@ -176,12 +180,14 @@ async function _syncICSToQB() {
       : _calEvs.find(function(c) { return c.title === ev.name && c.date === date; });
 
     if (!existing) {
+      var userId = currentUser().userId;
       var rec = {};
       rec[CE.title] = { value: ev.name };
       rec[CE.date]  = { value: date };
-      if (uid)           rec[CE.uid]       = { value: uid };
-      if (ev.startTime)  rec[CE.startTime] = { value: ev.startTime };
-      if (ev.endTime)    rec[CE.endTime]   = { value: ev.endTime };
+      if (uid)           rec[CE.uid]          = { value: uid };
+      if (ev.startTime)  rec[CE.startTime]    = { value: ev.startTime };
+      if (ev.endTime)    rec[CE.endTime]      = { value: ev.endTime };
+      if (userId)        rec[CE.assignedUser] = { value: userId };
       toCreate.push(rec);
     } else if (uid && !existing.uid) {
       // Back-fill UID onto a legacy record that was matched by title+date
