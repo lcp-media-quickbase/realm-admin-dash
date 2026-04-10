@@ -684,7 +684,8 @@ function homeAddNote() {
 }
 
 function homeEditNote(id) {
-  var n = _notes.find(function(n) { return n.id === id; });
+  id = parseInt(id);
+  var n = _notes.find(function(n) { return parseInt(n.id) === id; });
   if (!n) return;
 
   function inputRow(lbl, elId, value) {
@@ -763,6 +764,7 @@ function homeEditNote(id) {
 }
 
 async function homeDeleteNote(id) {
+  id = parseInt(id);
   if (!confirm('Delete this note?')) return;
   try {
     await qbDelete(TABLES.notes, '{3.EX.' + id + '}');
