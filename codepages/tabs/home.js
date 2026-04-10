@@ -240,7 +240,7 @@ function _renderRealmOverview() {
   }).join('');
 
   return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">' +
-    rows.replace(/border-bottom:1px solid var\(--border\)(?=.*<\/div>\s*$)/, '') + // remove last row's border
+    rows +
   '</div>';
 }
 
@@ -279,7 +279,7 @@ function homeOpenAppUsers(id) {
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
   modal.innerHTML =
     '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #68B6E5;' +
-      'border-radius:10px;width:500px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column">' +
+      'border-radius:10px;width:500px;max-width:92vw;height:560px;display:flex;flex-direction:column">' +
 
       // Header
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;flex-shrink:0">' +
@@ -591,7 +591,9 @@ function _render() {
 
     // Realm Overview
     sectionHeader('Realm Overview') +
-    _renderRealmOverview() +
+    '<div style="max-width:50%;min-width:280px">' +
+      _renderRealmOverview() +
+    '</div>' +
 
     '</div>'; // end page-body
 }
