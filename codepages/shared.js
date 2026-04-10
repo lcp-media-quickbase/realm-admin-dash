@@ -37,7 +37,8 @@ var TABLES = {
   tasks:     'btnit6q3m',
   realmLogs: 'bt8sr94e9',
   apps:      'bu83a2h8x',
-  notes:     'bvx6b5a7u',
+  notes:          'bvx6b5a7u',
+  calendarEvents: 'bvx6cvnp9',
 };
 
 // ─── FIELDS ──────────────────────────────────────────────────
@@ -82,6 +83,7 @@ var FIELD = {
     system:         142,
     startDate:      153,
     estEndDate:     154,
+    relatedCalEvent: 157,
   },
   REALM_LOGS: {
     dateCreated:     1,
@@ -103,10 +105,17 @@ var FIELD = {
     openToInternet:  8,
   },
   NOTES: {
-    name:           6,
-    description:    7,
-    relatedTask:    9,
-    relatedProject: 11,
+    name:              6,
+    description:       7,
+    relatedTask:       9,
+    relatedProject:    11,
+    relatedCalEvent:   13,
+  },
+  CALENDAR_EVENTS: {
+    title:     6,
+    date:      7,
+    startTime: 8,
+    endTime:   9,
   },
 };
 
