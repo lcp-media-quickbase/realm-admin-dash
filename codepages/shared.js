@@ -37,6 +37,9 @@ var TABLES = {
   tasks:     'btnit6q3m',
   realmLogs: 'bt8sr94e9',
   apps:      'bu83a2h8x',
+  users:      'bu83am495',
+  access:     'bu83ap7cp',
+  userTokens: 'bu83av22d',
   notes:          'bvx6b5a7u',
   calendarEvents: 'bvx6cvnp9',
 };
@@ -103,6 +106,14 @@ var FIELD = {
     id:             6,
     name:           7,
     openToInternet:  8,
+  },
+  ACCESS: {
+    userId:       7,
+    appId:        8,
+    permission:   9,
+    lastAccessed: 10,
+    appName:      17,
+    userName:     18,
   },
   NOTES: {
     name:              6,

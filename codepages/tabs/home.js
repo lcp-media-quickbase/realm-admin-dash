@@ -1,13 +1,15 @@
 (function() {
 
 // ─── State ────────────────────────────────────────────────────
-var _tasks     = [];
-var _projects  = [];
-var _releases  = [];
-var _realmLogs = [];
-var _icsEvs    = [];
-var _notes     = [];
-var _calEvs    = [];
+var _tasks       = [];
+var _projects    = [];
+var _releases    = [];
+var _apps        = [];
+var _access      = [];
+var _appExpanded = {};
+var _icsEvs      = [];
+var _notes       = [];
+var _calEvs      = [];
 
 // ─── Helpers ──────────────────────────────────────────────────
 function _toDateStr(d) {
@@ -99,14 +101,16 @@ registerTab('home', {
 async function _loadAll() {
   var icsUrl = (window._icsUtils && window._icsUtils.getICSUrl) ? window._icsUtils.getICSUrl() : '';
 
-  var RL = FIELD.REALM_LOGS;
   var NF = FIELD.NOTES;
   var CE = FIELD.CALENDAR_EVENTS;
   var results = await Promise.all([
     qbQueryAll(TABLES.tasks,          [3, 6, 7, 12, 13, 125, FIELD.TASKS.startDate, FIELD.TASKS.estEndDate, FIELD.TASKS.relatedCalEvent], null),
     qbQueryAll(TABLES.projects,       [3, 16, 28, 27, 23, 24], null),
     qbQueryAll(TABLES.releases,       [3, FIELD.RELEASES.releaseName, FIELD.RELEASES.startDate, FIELD.RELEASES.estEndDate], null),
-    qbQuery(TABLES.realmLogs,         [3, RL.dateCreated, RL.action, RL.details, RL.lastModifiedBy, RL.appName, RL.userFirstName, RL.userLastName, RL.accessUserName, RL.accessPermission], null, [{fieldId: RL.dateCreated, order: 'DESC'}], 30).then(function(r){ return r.records; }),
+    Promise.all([
+      qbQueryAll(TABLES.apps,   [3, FIELD.APPS.id, FIELD.APPS.name, FIELD.APPS.openToInternet], null),
+      qbQueryAll(TABLES.access, [3, FIELD.ACCESS.userId, FIELD.ACCESS.appId, FIELD.ACCESS.permission, FIELD.ACCESS.lastAccessed, FIELD.ACCESS.appName, FIELD.ACCESS.userName], null),
+    ]),
     icsUrl && window._icsUtils ? window._icsUtils.fetchICS(icsUrl) : Promise.resolve([]),
     qbQueryAll(TABLES.notes,          [3, NF.name, NF.description, NF.relatedTask, NF.relatedProject, NF.relatedCalEvent], null, [{fieldId: 3, order: 'DESC'}]),
     (function() {
@@ -125,19 +129,23 @@ async function _loadAll() {
     };
   });
 
-  var RL = FIELD.REALM_LOGS;
-  _realmLogs = (results[3] || []).map(function(r) {
+  _apps = results[3][0].map(function(r) {
     return {
       id:             val(r, 3),
-      dateCreated:    val(r, RL.dateCreated)     || '',
-      action:         val(r, RL.action)          || '',
-      details:        val(r, RL.details)         || '',
-      lastModifiedBy: val(r, RL.lastModifiedBy)  || '',
-      appName:        val(r, RL.appName)         || '',
-      userFirstName:  val(r, RL.userFirstName)   || '',
-      userLastName:   val(r, RL.userLastName)    || '',
-      accessUserName: val(r, RL.accessUserName)  || '',
-      accessPermission: val(r, RL.accessPermission) || '',
+      appId:          val(r, FIELD.APPS.id)            || '',
+      name:           val(r, FIELD.APPS.name)          || '',
+      openToInternet: val(r, FIELD.APPS.openToInternet) || '',
+    };
+  });
+  _access = results[3][1].map(function(r) {
+    return {
+      id:           val(r, 3),
+      userId:       val(r, FIELD.ACCESS.userId)       || '',
+      appId:        val(r, FIELD.ACCESS.appId)        || '',
+      permission:   val(r, FIELD.ACCESS.permission)   || '',
+      lastAccessed: val(r, FIELD.ACCESS.lastAccessed) || '',
+      appName:      val(r, FIELD.ACCESS.appName)      || '',
+      userName:     val(r, FIELD.ACCESS.userName)     || '',
     };
   });
 
@@ -189,42 +197,71 @@ async function _loadAll() {
     };
   });
 
-  _computeLogDiffs();
 }
 
-// ─── Diff Computation ─────────────────────────────────────────
-// Annotates each realm log with ._prev when a prior entry for the
-// same subject (user + app) had a different value for a tracked field.
-function _computeLogDiffs() {
-  // Logs arrive DESC; reverse to walk chronologically
-  var asc = _realmLogs.slice().reverse();
-  var lastSeen = {}; // subjectKey → { permission }
+// ─── Realm Overview ───────────────────────────────────────────
+function _renderRealmOverview() {
+  if (_apps.length === 0) {
+    return '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No apps found</div></div>';
+  }
 
-  asc.forEach(function(log) {
-    var user = log.accessUserName
-            || [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
-            || '';
-    var parts = [];
-    if (user)        parts.push(user.toLowerCase());
-    if (log.appName) parts.push(log.appName.toLowerCase());
-    var key = parts.join('|||');
-    if (!key) return; // nothing to key on
-
-    var prev = lastSeen[key];
-    if (prev) {
-      log._prev = {};
-      if (prev.permission && log.accessPermission && prev.permission !== log.accessPermission) {
-        log._prev.permission = prev.permission;
-      }
-    } else {
-      log._prev = null;
-    }
-
-    // Always update lastSeen — carry forward if current entry doesn't have a value
-    lastSeen[key] = {
-      permission: log.accessPermission || (prev && prev.permission) || '',
-    };
+  var accessByApp = {};
+  _access.forEach(function(a) {
+    var key = String(a.appId);
+    if (!key || key === '0') return;
+    if (!accessByApp[key]) accessByApp[key] = [];
+    accessByApp[key].push(a);
   });
+
+  function permColor(p) {
+    return !p                      ? 'var(--text-dim)' :
+           /admin/i.test(p)        ? '#e86060'         :
+           /manager/i.test(p)      ? '#e8a860'         :
+           /basic|viewer/i.test(p) ? '#82c96a'         : '#68B6E5';
+  }
+
+  var cards = _apps.map(function(app) {
+    var users    = accessByApp[String(app.id)] || [];
+    var expanded = _appExpanded[app.id];
+
+    var chevron = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transform:rotate(' + (expanded ? '90' : '0') + 'deg);transition:transform 0.15s;color:var(--text-dim)">' +
+      '<polyline points="9 18 15 12 9 6"/></svg>';
+
+    var usersHtml = expanded
+      ? (users.length === 0
+          ? '<div style="padding:8px 14px;font-size:12px;color:var(--text-dim);border-top:1px solid var(--border)">No users found</div>'
+          : users.map(function(u) {
+              var color    = permColor(u.permission);
+              var lastDate = u.lastAccessed ? String(u.lastAccessed).split('T')[0] : '';
+              return '<div style="display:flex;align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--border)">' +
+                '<div style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(u.userName || u.userId || '—') + '</div>' +
+                '<span style="font-size:11px;font-weight:500;color:' + color + ';background:' + color + '1a;' +
+                  'padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0">' + escapeHtml(u.permission || '—') + '</span>' +
+                (lastDate ? '<div style="font-size:10px;color:var(--text-dim);white-space:nowrap;flex-shrink:0">' + escapeHtml(lastDate) + '</div>' : '') +
+              '</div>';
+            }).join(''))
+      : '';
+
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px">' +
+      '<div onclick="homeToggleApp(' + app.id + ')" ' +
+        'style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none" ' +
+        'onmouseenter="this.style.background=\'var(--bg)\'" onmouseleave="this.style.background=\'\'">' +
+        chevron +
+        '<span style="font-size:13px;font-weight:600;color:var(--text);flex:1">' + escapeHtml(app.name || app.appId || '—') + '</span>' +
+        (app.openToInternet ? '<span style="font-size:10px;color:#82c96a;background:#82c96a1a;padding:2px 8px;border-radius:10px;flex-shrink:0">Public</span>' : '') +
+        '<span style="font-size:11px;color:var(--text-dim);flex-shrink:0">' + users.length + ' user' + (users.length !== 1 ? 's' : '') + '</span>' +
+      '</div>' +
+      usersHtml +
+    '</div>';
+  }).join('');
+
+  return '<div style="display:flex;flex-direction:column">' + cards + '</div>';
+}
+
+function homeToggleApp(id) {
+  _appExpanded[id] = !_appExpanded[id];
+  _render();
 }
 
 // ─── Notes helpers ────────────────────────────────────────────
@@ -477,88 +514,9 @@ function _render() {
         }).join('')
       : '') +
 
-    // Realm Activity — Kanban columns by action type
-    sectionHeader('Recent Realm Activity') +
-    (_realmLogs.length === 0
-      ? '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No realm log entries found</div></div>'
-      : (function() {
-          // Group logs by action type, preserving DESC order within each group
-          var groups  = {};
-          var colOrder = [];
-          _realmLogs.forEach(function(log) {
-            var key = log.action || 'Other';
-            if (!groups[key]) { groups[key] = []; colOrder.push(key); }
-            groups[key].push(log);
-          });
-
-          function _colColor(action) {
-            var a = action.toLowerCase();
-            return /permission|access/i.test(a) ? '#e8a860' :
-                   /add|creat/i.test(a)         ? '#82c96a' :
-                   /remov|delet/i.test(a)       ? '#e86060' :
-                   /app|setting/i.test(a)       ? '#68B6E5' : '#9b59b6';
-          }
-
-          var cols = colOrder.map(function(action) {
-            var logs  = groups[action];
-            var color = _colColor(action);
-
-            var cards = logs.map(function(log) {
-              var user = [log.userFirstName, log.userLastName].filter(Boolean).join(' ')
-                      || log.accessUserName || '';
-              var app  = log.appName || '';
-              var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
-              var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
-                ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
-              var modBy = log.lastModifiedBy && log.lastModifiedBy !== user ? log.lastModifiedBy : '';
-
-              return '<div onclick="homeOpenRealmLog(' + log.id + ')" ' +
-                'style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
-                'padding:8px 10px;margin-bottom:6px;border-left:3px solid ' + color + ';cursor:pointer" ' +
-                'onmouseenter="this.style.borderColor=\'' + color + '\';this.style.background=\'var(--surface)\'" ' +
-                'onmouseleave="this.style.borderColor=\'var(--border)\';this.style.background=\'var(--bg)\'">' +
-                '<div style="font-size:10px;color:var(--text-dim);margin-bottom:5px">' +
-                  escapeHtml(dateStr) + (timeStr ? ' · ' + escapeHtml(timeStr) : '') +
-                '</div>' +
-                (log.details
-                  ? '<div style="font-size:12px;color:var(--text);line-height:1.4;margin-bottom:4px">' + escapeHtml(log.details) + '</div>'
-                  : '') +
-                (app
-                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">App:</span> ' + escapeHtml(app) + '</div>'
-                  : '') +
-                (user
-                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">User:</span> ' + escapeHtml(user) + '</div>'
-                  : '') +
-                (log.accessPermission
-                  ? '<div style="font-size:11px;color:var(--text-muted)"><span style="color:var(--text-dim)">Perm:</span> ' +
-                    (log._prev && log._prev.permission
-                      ? '<span style="color:var(--text-dim);text-decoration:line-through">' + escapeHtml(log._prev.permission) + '</span>' +
-                        ' → <span style="color:' + color + '">' + escapeHtml(log.accessPermission) + '</span>'
-                      : escapeHtml(log.accessPermission)) +
-                    '</div>'
-                  : '') +
-                (modBy
-                  ? '<div style="font-size:10px;color:var(--text-dim);margin-top:3px">by ' + escapeHtml(modBy) + '</div>'
-                  : '') +
-              '</div>';
-            }).join('');
-
-            return '<div style="min-width:220px;flex:1;background:var(--surface);border:1px solid var(--border);' +
-              'border-radius:8px;overflow:hidden;display:flex;flex-direction:column">' +
-              '<div style="padding:8px 12px;background:' + color + '1a;border-bottom:2px solid ' + color + ';' +
-                'display:flex;align-items:center;gap:8px;flex-shrink:0">' +
-                '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
-                '<span style="font-size:12px;font-weight:600;color:var(--text)">' + escapeHtml(action) + '</span>' +
-                '<span style="font-size:10px;color:var(--text-dim);margin-left:auto;background:var(--border);' +
-                  'padding:1px 6px;border-radius:10px">' + logs.length + '</span>' +
-              '</div>' +
-              '<div style="padding:8px;overflow-y:auto;max-height:380px">' + cards + '</div>' +
-            '</div>';
-          }).join('');
-
-          return '<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:flex-start">' + cols + '</div>';
-        })()
-    ) +
+    // Realm Overview
+    sectionHeader('Realm Overview') +
+    _renderRealmOverview() +
 
     '</div>'; // end page-body
 }
@@ -580,70 +538,6 @@ function homeOpenEdit(type, id) {
   window._openEditModal(type, item, _render);
 }
 
-function homeOpenRealmLog(id) {
-  var log = _realmLogs.find(function(l) { return l.id === id; });
-  if (!log) return;
-
-  function _colColor(action) {
-    var a = (action || '').toLowerCase();
-    return /permission|access/i.test(a) ? '#e8a860' :
-           /add|creat/i.test(a)         ? '#82c96a' :
-           /remov|delet/i.test(a)       ? '#e86060' :
-           /app|setting/i.test(a)       ? '#68B6E5' : '#9b59b6';
-  }
-
-  var color   = _colColor(log.action);
-  var user    = [log.userFirstName, log.userLastName].filter(Boolean).join(' ') || log.accessUserName || '';
-  var dateStr = log.dateCreated ? String(log.dateCreated).split('T')[0] : '';
-  var timeStr = log.dateCreated && String(log.dateCreated).indexOf('T') > -1
-    ? String(log.dateCreated).split('T')[1].slice(0,5) : '';
-
-  function field(label, value) {
-    if (!value) return '';
-    return '<div style="display:flex;flex-direction:column;gap:2px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-      '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">' + label + '</div>' +
-      '<div style="font-size:13px;color:var(--text);line-height:1.5;white-space:pre-wrap">' + escapeHtml(value) + '</div>' +
-    '</div>';
-  }
-
-  var modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
-  modal.innerHTML =
-    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid ' + color + ';' +
-      'border-radius:10px;padding:24px;width:440px;max-width:92vw;display:flex;flex-direction:column;gap:0;max-height:85vh;overflow-y:auto">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
-        '<div style="display:flex;align-items:center;gap:8px">' +
-          '<div style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>' +
-          '<span style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(log.action || 'Realm Log') + '</span>' +
-        '</div>' +
-        '<span style="font-size:11px;color:var(--text-dim)">' + escapeHtml(dateStr) + (timeStr ? ' · ' + escapeHtml(timeStr) : '') + '</span>' +
-      '</div>' +
-      field('Details',         log.details) +
-      field('App',             log.appName) +
-      field('User',            user) +
-      (log.accessPermission
-        ? '<div style="display:flex;flex-direction:column;gap:2px;padding:10px 0;border-bottom:1px solid var(--border)">' +
-            '<div style="font-size:10px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px">Access Permission</div>' +
-            (log._prev && log._prev.permission
-              ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
-                  '<span style="font-size:13px;color:var(--text-dim);text-decoration:line-through">' + escapeHtml(log._prev.permission) + '</span>' +
-                  '<span style="color:var(--text-dim)">→</span>' +
-                  '<span style="font-size:13px;font-weight:600;color:' + color + '">' + escapeHtml(log.accessPermission) + '</span>' +
-                  '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 6px;border-radius:10px">changed</span>' +
-                '</div>'
-              : '<div style="font-size:13px;color:var(--text)">' + escapeHtml(log.accessPermission) + '</div>') +
-          '</div>'
-        : '') +
-      field('Modified By',    log.lastModifiedBy) +
-      '<div style="padding-top:14px;display:flex;justify-content:flex-end">' +
-        '<button class="btn btn-sm" id="rlm-close">Close</button>' +
-      '</div>' +
-    '</div>';
-
-  document.body.appendChild(modal);
-  document.getElementById('rlm-close').onclick = function() { document.body.removeChild(modal); };
-  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
-}
 
 // ─── Notes Actions ────────────────────────────────────────────
 function homeAddNote() {
@@ -1074,7 +968,7 @@ function _homeNewNoteForCalEvent(ev) {
 
 window.homeRefresh        = homeRefresh;
 window.homeOpenEdit       = homeOpenEdit;
-window.homeOpenRealmLog   = homeOpenRealmLog;
+window.homeToggleApp      = homeToggleApp;
 window.homeOpenCalEvent   = homeOpenCalEvent;
 window.homeAddNote        = homeAddNote;
 window.homeEditNote       = homeEditNote;
