@@ -251,8 +251,9 @@ function _renderThreeCol(today) {
     _notes.map(function(n) {
       var linkedTask    = n.relatedTask    ? _taskName(n.relatedTask)       : '';
       var linkedProject = n.relatedProject ? _projectName(n.relatedProject) : '';
-      return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
-        'padding:8px 10px;position:relative">' +
+      return '<div onclick="homeEditNote(' + n.id + ')" ' +
+        'style="background:var(--bg);border:1px solid var(--border);border-radius:6px;' +
+        'padding:8px 10px;position:relative;cursor:pointer">' +
         '<div style="font-size:12px;font-weight:600;color:var(--text);padding-right:18px;margin-bottom:3px">' + escapeHtml(n.name || '(Untitled)') + '</div>' +
         (n.description ? '<div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;line-height:1.5;margin-bottom:4px">' + escapeHtml(n.description) + '</div>' : '') +
         ((linkedTask || linkedProject)
@@ -261,7 +262,7 @@ function _renderThreeCol(today) {
             (linkedProject ? '<span style="font-size:10px;color:var(--text-dim);background:var(--border);padding:1px 6px;border-radius:10px">Project: ' + escapeHtml(linkedProject) + '</span>' : '') +
           '</div>'
           : '') +
-        '<button onclick="homeDeleteNote(' + n.id + ')" title="Delete" ' +
+        '<button onclick="event.stopPropagation();homeDeleteNote(' + n.id + ')" title="Delete" ' +
           'style="position:absolute;top:5px;right:7px;background:none;border:none;' +
             'color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:0">×</button>' +
       '</div>';
@@ -682,6 +683,85 @@ function homeAddNote() {
   modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
 }
 
+function homeEditNote(id) {
+  var n = _notes.find(function(n) { return n.id === id; });
+  if (!n) return;
+
+  function inputRow(lbl, elId, value) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<input id="' + elId + '" type="text" value="' + escapeHtml(value || '') + '" ' +
+        'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+          'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+    '</div>';
+  }
+  function selectRow(lbl, elId, optionsHtml) {
+    return '<div style="display:flex;flex-direction:column;gap:4px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">' + lbl + '</label>' +
+      '<select id="' + elId + '" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+        'padding:7px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box">' +
+        optionsHtml +
+      '</select>' +
+    '</div>';
+  }
+
+  var taskOptions = '<option value="">— None —</option>' +
+    _tasks.map(function(t) {
+      return '<option value="' + t.id + '"' + (String(n.relatedTask) === String(t.id) ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>';
+    }).join('');
+  var projectOptions = '<option value="">— None —</option>' +
+    _projects.map(function(p) {
+      return '<option value="' + p.id + '"' + (String(n.relatedProject) === String(p.id) ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>';
+    }).join('');
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;padding:24px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:14px">' +
+      '<div style="font-size:15px;font-weight:600;color:var(--text)">Edit Note</div>' +
+      inputRow('Title *', 'nem-name', n.name) +
+      '<div style="display:flex;flex-direction:column;gap:4px">' +
+        '<label style="font-size:11px;color:var(--text-muted)">Description</label>' +
+        '<textarea id="nem-desc" rows="5" ' +
+          'style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;' +
+            'padding:8px 10px;font-family:inherit;font-size:13px;width:100%;box-sizing:border-box;resize:vertical">' +
+          escapeHtml(n.description || '') +
+        '</textarea>' +
+      '</div>' +
+      selectRow('Related Task (optional)', 'nem-task', taskOptions) +
+      selectRow('Related Project (optional)', 'nem-project', projectOptions) +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-sm" id="nem-cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="nem-save">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('nem-cancel').onclick = function() { document.body.removeChild(modal); };
+  document.getElementById('nem-save').onclick = async function() {
+    var name = document.getElementById('nem-name').value.trim();
+    if (!name) { showToast('Title is required', 'error'); return; }
+    try {
+      var NF  = FIELD.NOTES;
+      var rec = { 3: { value: n.id } };
+      rec[NF.name]        = { value: name };
+      rec[NF.description] = { value: document.getElementById('nem-desc').value.trim() };
+      var taskId    = document.getElementById('nem-task').value;
+      var projectId = document.getElementById('nem-project').value;
+      rec[NF.relatedTask]    = { value: taskId    ? parseInt(taskId)    : '' };
+      rec[NF.relatedProject] = { value: projectId ? parseInt(projectId) : '' };
+      await qbUpsert(TABLES.notes, [rec], [3]);
+      document.body.removeChild(modal);
+      showToast('Note saved', 'success');
+      await _loadAll();
+      _render();
+    } catch(e) {
+      showToast('Failed: ' + e.message, 'error');
+    }
+  };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
+}
+
 async function homeDeleteNote(id) {
   if (!confirm('Delete this note?')) return;
   try {
@@ -792,6 +872,7 @@ window.homeRefresh        = homeRefresh;
 window.homeOpenEdit       = homeOpenEdit;
 window.homeOpenRealmLog   = homeOpenRealmLog;
 window.homeAddNote        = homeAddNote;
+window.homeEditNote       = homeEditNote;
 window.homeDeleteNote     = homeDeleteNote;
 window.homeNewTask        = homeNewTask;
 window.homeTaskDragStart  = homeTaskDragStart;
