@@ -168,8 +168,34 @@ async function _loadAll() {
 // ─── ICS → QB sync ────────────────────────────────────────────
 async function _syncICSToQB() {
   if (!_icsEvents.length) return;
-  var CE = FIELD.CALENDAR_EVENTS;
+  var CE     = FIELD.CALENDAR_EVENTS;
+  var userId = currentUser().userId;
+
+  // Query ALL calendar events (no user filter) for dedup.
+  // Existing records may not yet have assignedUser set, so the user-filtered
+  // _calEvs list would miss them and we'd create duplicates.
+  var allEvRows;
+  try {
+    allEvRows = await qbQueryAll(TABLES.calendarEvents,
+      [3, CE.title, CE.date, CE.uid, CE.assignedUser], null);
+  } catch(e) {
+    console.warn('[Cal] Could not load all cal events for sync:', e.message);
+    allEvRows = [];
+  }
+  var allEvs = allEvRows.map(function(r) {
+    var assignedVal = r[CE.assignedUser] && r[CE.assignedUser].value;
+    var hasUser = assignedVal && (typeof assignedVal === 'object' ? assignedVal.id : assignedVal);
+    return {
+      id:      val(r, 3),
+      title:   val(r, CE.title) || '',
+      date:    String(val(r, CE.date) || '').split('T')[0],
+      uid:     val(r, CE.uid)   || '',
+      hasUser: !!hasUser,
+    };
+  });
+
   var toCreate = [];
+  var toAssign = []; // existing records that need assignedUser back-filled
 
   _icsEvents.forEach(function(ev) {
     var date = ev.start || '';
@@ -177,41 +203,73 @@ async function _syncICSToQB() {
 
     // Match by UID first (reliable), fall back to title+date (legacy)
     var existing = uid
-      ? _calEvs.find(function(c) { return c.uid === uid; })
-      : _calEvs.find(function(c) { return c.title === ev.name && c.date === date; });
+      ? allEvs.find(function(c) { return c.uid === uid; })
+      : allEvs.find(function(c) { return c.title === ev.name && c.date === date; });
 
     if (!existing) {
-      var userId = currentUser().userId;
       var rec = {};
       rec[CE.title] = { value: ev.name };
       rec[CE.date]  = { value: date };
-      if (uid)           rec[CE.uid]          = { value: uid };
-      if (ev.startTime)  rec[CE.startTime]    = { value: ev.startTime };
-      if (ev.endTime)    rec[CE.endTime]      = { value: ev.endTime };
-      if (userId)        rec[CE.assignedUser] = { value: userId };
+      if (uid)          rec[CE.uid]          = { value: uid };
+      if (ev.startTime) rec[CE.startTime]    = { value: ev.startTime };
+      if (ev.endTime)   rec[CE.endTime]      = { value: ev.endTime };
+      if (userId)       rec[CE.assignedUser] = { value: userId };
       toCreate.push(rec);
-    } else if (uid && !existing.uid) {
-      // Back-fill UID onto a legacy record that was matched by title+date
-      var patch = { 3: { value: existing.id } };
-      patch[CE.uid] = { value: uid };
-      qbUpsert(TABLES.calendarEvents, [patch], [3]).catch(function() {});
-      existing.uid = uid;
+    } else {
+      // Back-fill UID onto legacy record matched by title+date
+      if (uid && !existing.uid) {
+        var uidPatch = { 3: { value: existing.id } };
+        uidPatch[CE.uid] = { value: uid };
+        qbUpsert(TABLES.calendarEvents, [uidPatch], [3]).catch(function() {});
+        existing.uid = uid;
+      }
+      // Back-fill assignedUser on records that were created before userId was available
+      if (userId && !existing.hasUser) {
+        var userPatch = { 3: { value: existing.id } };
+        userPatch[CE.assignedUser] = { value: userId };
+        toAssign.push(userPatch);
+        existing.hasUser = true; // prevent duplicate patches in the same run
+      }
     }
   });
+
+  // Back-fill assignedUser in bulk, then refresh _calEvs
+  if (toAssign.length) {
+    try {
+      await qbUpsert(TABLES.calendarEvents, toAssign, [3]);
+      console.log('[Cal] Back-filled assignedUser on', toAssign.length, 'calendar events');
+      // Re-query now that records have the user set
+      var where = userId ? '{' + CE.assignedUser + '.EX.' + userId + '}' : null;
+      var refreshed = await qbQueryAll(TABLES.calendarEvents,
+        [3, CE.title, CE.date, CE.startTime, CE.endTime, CE.uid], where);
+      _calEvs = refreshed.map(function(r) {
+        return {
+          id:        val(r, 3),
+          title:     val(r, CE.title)     || '',
+          date:      String(val(r, CE.date) || '').split('T')[0],
+          startTime: val(r, CE.startTime) || '',
+          endTime:   val(r, CE.endTime)   || '',
+          uid:       val(r, CE.uid)       || '',
+        };
+      });
+      window._calEvs = _calEvs;
+    } catch(e) {
+      console.warn('[Cal] assignedUser back-fill failed:', e.message);
+    }
+  }
 
   if (!toCreate.length) return;
   try {
     var result = await qbUpsert(TABLES.calendarEvents, toCreate, [3, CE.title, CE.date, CE.uid]);
     (result.data || []).forEach(function(r) {
-      var newRec = {
+      _calEvs.push({
         id:        val(r, 3),
         title:     val(r, CE.title) || '',
         date:      String(val(r, CE.date) || '').split('T')[0],
         startTime: '',
         endTime:   '',
         uid:       val(r, CE.uid) || '',
-      };
-      _calEvs.push(newRec);
+      });
     });
     window._calEvs = _calEvs;
   } catch(e) {
