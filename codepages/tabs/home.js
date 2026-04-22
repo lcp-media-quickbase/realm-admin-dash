@@ -134,8 +134,9 @@ async function _loadAll() {
       openToInternet: val(r, FIELD.APPS.openToInternet) || '',
     };
   });
+  console.log('[Home] Apps loaded:', _apps.length, _apps.map(function(a) { return a.name + ' (appId:' + a.appId + ')'; }));
 
-  // Fetch users for each app via QB API_GetUsersForApp
+  // Fetch users for each app via QB API_UserRoles
   var _userFetches = await Promise.all(_apps.map(function(app) {
     return _fetchAppUsers(app.appId);
   }));
@@ -196,7 +197,8 @@ async function _loadAll() {
 
 // ─── Realm Overview ───────────────────────────────────────────
 async function _fetchAppUsers(appDBID) {
-  if (!appDBID) return [];
+  console.log('[Home] _fetchAppUsers called with appDBID:', appDBID);
+  if (!appDBID) { console.warn('[Home] _fetchAppUsers: empty appDBID, skipping'); return []; }
   try {
     var ticket = (typeof gReqTkt !== 'undefined' && gReqTkt) ? gReqTkt : '';
     var url = 'https://' + QB_REALM + '/db/' + appDBID + '?a=API_UserRoles' +
@@ -335,6 +337,125 @@ function homeOpenAppUsers(id) {
   document.getElementById('hau-close').onclick = function() { document.body.removeChild(modal); };
   modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
 
+  searchEl.addEventListener('input', function() {
+    var q = this.value;
+    clearTimeout(timer);
+    timer = setTimeout(function() { listEl.innerHTML = renderList(q); }, 150);
+  });
+  searchEl.focus();
+}
+
+// ─── User Directory ───────────────────────────────────────────
+function _buildUserDirectory() {
+  var userMap = {};
+  _apps.forEach(function(app) {
+    (_appUsers[app.id] || []).forEach(function(u) {
+      if (!userMap[u.userId]) userMap[u.userId] = { name: u.name, apps: [] };
+      userMap[u.userId].apps.push({ appName: app.name || app.appId || '—', role: u.role });
+    });
+  });
+  return Object.keys(userMap).map(function(uid) {
+    return { userId: uid, name: userMap[uid].name, apps: userMap[uid].apps };
+  }).sort(function(a, b) {
+    return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+  });
+}
+
+function _renderUserDirectory() {
+  var users = _buildUserDirectory();
+  if (users.length === 0) {
+    return '<div class="empty-state" style="padding:16px 0"><div class="empty-state-text">No users found</div></div>';
+  }
+  var rows = users.map(function(u) {
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border)">' +
+      '<span style="font-size:13px;font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" ' +
+        'title="' + escapeHtml(u.name || u.userId || '') + '">' + escapeHtml(u.name || u.userId || '—') + '</span>' +
+      '<span style="font-size:11px;color:var(--text-dim);flex-shrink:0">' + u.apps.length + ' app' + (u.apps.length !== 1 ? 's' : '') + '</span>' +
+      '<button class="btn btn-sm" onclick="homeOpenUserApps(' + JSON.stringify(u.userId) + ')" ' +
+        'style="font-size:11px;padding:3px 10px;flex-shrink:0">View →</button>' +
+    '</div>';
+  }).join('');
+  return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">' + rows + '</div>';
+}
+
+function homeOpenUserApps(userId) {
+  var userName = '';
+  var userApps = [];
+  _apps.forEach(function(app) {
+    var u = (_appUsers[app.id] || []).find(function(u) { return u.userId === userId; });
+    if (u) {
+      if (!userName) userName = u.name;
+      userApps.push({ appName: app.name || app.appId || '—', role: u.role });
+    }
+  });
+  userApps.sort(function(a, b) { return a.appName.toLowerCase().localeCompare(b.appName.toLowerCase()); });
+
+  function permColor(p) {
+    return !p                      ? 'var(--text-dim)' :
+           /admin/i.test(p)        ? '#e86060'         :
+           /manager/i.test(p)      ? '#e8a860'         :
+           /basic|viewer/i.test(p) ? '#82c96a'         : '#68B6E5';
+  }
+
+  function renderList(q) {
+    var filtered = q
+      ? userApps.filter(function(a) {
+          return ((a.appName || '') + ' ' + (a.role || '')).toLowerCase().indexOf(q.toLowerCase()) !== -1;
+        })
+      : userApps;
+    if (filtered.length === 0) {
+      return '<div style="text-align:center;padding:28px;font-size:13px;color:var(--text-dim)">No apps match</div>';
+    }
+    return filtered.map(function(a) {
+      var color = permColor(a.role);
+      return '<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border)">' +
+        '<div style="flex:1;font-size:13px;color:var(--text)">' + escapeHtml(a.appName) + '</div>' +
+        '<span style="font-size:11px;font-weight:500;color:' + color + ';background:' + color + '1a;' +
+          'padding:3px 10px;border-radius:10px;white-space:nowrap">' + escapeHtml(a.role || '—') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-top:3px solid #9b59b6;' +
+      'border-radius:10px;width:500px;max-width:92vw;height:560px;display:flex;flex-direction:column">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;flex-shrink:0">' +
+        '<div>' +
+          '<div style="font-size:15px;font-weight:600;color:var(--text)">' + escapeHtml(userName || userId) + '</div>' +
+          '<div style="font-size:12px;color:var(--text-dim);margin-top:2px">' + userApps.length + ' app' + (userApps.length !== 1 ? 's' : '') + '</div>' +
+        '</div>' +
+        '<button id="hua-x" style="background:none;border:none;font-size:22px;color:var(--text-dim);cursor:pointer;line-height:1;padding:0 2px">×</button>' +
+      '</div>' +
+      '<div style="padding:0 16px 12px;flex-shrink:0">' +
+        '<div style="position:relative">' +
+          '<svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none" ' +
+            'width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>' +
+          '</svg>' +
+          '<input id="hua-search" placeholder="Search by app or role…" autocomplete="off" ' +
+            'style="width:100%;padding:7px 12px 7px 30px;background:var(--bg);color:var(--text);' +
+              'border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;' +
+              'outline:none;box-sizing:border-box" ' +
+            'onfocus="this.style.borderColor=\'var(--accent)\'" onblur="this.style.borderColor=\'var(--border)\'">' +
+        '</div>' +
+      '</div>' +
+      '<div id="hua-list" style="overflow-y:auto;flex:1;border-top:1px solid var(--border)">' +
+        renderList('') +
+      '</div>' +
+      '<div style="padding:12px 20px;flex-shrink:0;display:flex;justify-content:flex-end;border-top:1px solid var(--border)">' +
+        '<button class="btn btn-sm" id="hua-close">Close</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+  var searchEl = document.getElementById('hua-search');
+  var listEl   = document.getElementById('hua-list');
+  var timer    = null;
+  document.getElementById('hua-x').onclick     = function() { document.body.removeChild(modal); };
+  document.getElementById('hua-close').onclick = function() { document.body.removeChild(modal); };
+  modal.addEventListener('click', function(e) { if (e.target === modal) document.body.removeChild(modal); });
   searchEl.addEventListener('input', function() {
     var q = this.value;
     clearTimeout(timer);
@@ -598,10 +719,16 @@ function _render() {
         }).join('')
       : '') +
 
-    // Realm Overview
-    sectionHeader('Realm Overview') +
-    '<div style="max-width:50%;min-width:280px">' +
-      _renderRealmOverview() +
+    // Realm Overview + User Directory
+    '<div style="display:flex;gap:20px;align-items:flex-start">' +
+      '<div style="flex:1;min-width:0">' +
+        sectionHeader('Realm Overview') +
+        _renderRealmOverview() +
+      '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        sectionHeader('User Directory') +
+        _renderUserDirectory() +
+      '</div>' +
     '</div>' +
 
     '</div>'; // end page-body
@@ -1055,6 +1182,7 @@ function _homeNewNoteForCalEvent(ev) {
 window.homeRefresh        = homeRefresh;
 window.homeOpenEdit       = homeOpenEdit;
 window.homeOpenAppUsers   = homeOpenAppUsers;
+window.homeOpenUserApps   = homeOpenUserApps;
 window.homeOpenCalEvent   = homeOpenCalEvent;
 window.homeAddNote        = homeAddNote;
 window.homeEditNote       = homeEditNote;
